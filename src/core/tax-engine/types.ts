@@ -191,6 +191,7 @@ export interface MonthlyTaxSettlementResult {
   period: string;
   regime: TaxRegimeCode;
   regimeName: string;
+  regimenName: string;
   uitApplicable: string;
   ventasGravadas: string;
   debitoFiscalIgv: string;

@@ -1,6 +1,6 @@
 import { Decimal } from 'decimal.js';
 import { CpeDocumentCalculationResult, CpeDocumentInput, CalculatedItem, IgvAffectationCode } from './types.js';
-import { getTaxConfigForYear } from './tax-config.js';
+import { getTaxConfigForYear, getTaxRegimeConfig } from './tax-config.js';
 import { validateCpeInput } from './validators.js';
 import { numberToWordsPeru } from './number-to-words.js';
 
@@ -21,7 +21,7 @@ function calculateItem(item: CpeDocumentInput['items'][number]): CalculatedItem 
   const explicitDiscount = new Decimal(item.discountAmount ?? 0);
   const isExonerated = item.affectationType.startsWith('2');
   const isInafect = item.affectationType.startsWith('3') || item.affectationType === '40';
-  const isGratuitous = item.affectationType.endsWith('1') || ['12','13','14','16','21','31','32','33','34','35','36'].includes(item.affectationType);
+  const isGratuitous = item.affectationType.endsWith('1') || ['12', '13', '14', '16', '21', '31', '32', '33', '34', '35', '36'].includes(item.affectationType);
   const hasIgv = !isExonerated && !isInafect && item.affectationType !== '40';
 
   let unitValue: Decimal;
@@ -67,11 +67,17 @@ function calculateItem(item: CpeDocumentInput['items'][number]): CalculatedItem 
 }
 
 export function calculateCpe(input: CpeDocumentInput): CpeDocumentCalculationResult {
+  const regimeConfig = getTaxRegimeConfig(input.company.taxRegime);
+  if (!regimeConfig.allowedCpeTypes.includes(input.cpeType)) {
+    throw new Error(`El régimen ${regimeConfig.name} no permite emitir comprobantes tipo ${input.cpeType}.`);
+  }
+
   const validationErrors = validateCpeInput(input);
   if (validationErrors.length > 0) {
     throw new Error(`Errores de validación del comprobante:\n- ${validationErrors.join('\n- ')}`);
   }
 
+  const year = Number(input.issueDate.slice(0, 4));
   const calculatedItems = input.items.map(calculateItem);
   let operacionesGravadas = ZERO;
   let operacionesExoneradas = ZERO;
@@ -100,7 +106,6 @@ export function calculateCpe(input: CpeDocumentInput): CpeDocumentCalculationRes
   const descuentoGlobal = roundMoney(new Decimal(input.globalDiscountAmount ?? 0));
   const totalPagar = roundMoney(totalOperaciones.minus(descuentoGlobal));
   const subTotal = roundMoney(operacionesGravadas.plus(operacionesExoneradas).plus(operacionesInafectas).minus(descuentoGlobal));
-  const year = Number(input.issueDate.slice(0, 4));
   const config = getTaxConfigForYear(year);
 
   // Comprobantes con descuento global deben distribuir el descuento por tipo de afectación.

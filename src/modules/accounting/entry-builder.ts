@@ -1,0 +1,480 @@
+import { Decimal } from "decimal.js";
+import {
+  AccountingAutomationConfig,
+  CreateJournalEntryInput,
+  JournalEntry,
+  JournalEntryLine,
+  OriginDocumentReference,
+} from "./types.js";
+import { resolveAccountName } from "./pcge-catalog.js";
+import { CpeRecord } from "../cpe/types.js";
+import { PurchaseDocumentRecord } from "../purchases/types.js";
+
+Decimal.set({ precision: 24, rounding: Decimal.ROUND_HALF_UP });
+
+const round2 = (val: Decimal | number | string): string => {
+  return new Decimal(val).toFixed(2);
+};
+
+export const DEFAULT_ACCOUNTING_CONFIG: Required<AccountingAutomationConfig> = {
+  defaultReceivableAccount: "1212",
+  defaultPayableAccount: "4212",
+  defaultIgvAccount: "40111",
+  defaultSaleAccountMerchandise: "70121",
+  defaultSaleAccountServices: "70221",
+  defaultPurchaseAccountMerchandise: "6011",
+  defaultInventoryAccount: "20111",
+  defaultInventoryVariationAccount: "6111",
+  defaultAdminExpenseAccount: "941",
+  defaultSellingExpenseAccount: "951",
+  defaultImputableExpenseAccount: "791",
+  adminExpenseRatio: 0.5,
+  sellingExpenseRatio: 0.5,
+};
+
+/**
+ * Valida la partida doble de un asiento contable (Debe == Haber con precisión decimal)
+ */
+export function validateJournalEntryBalance(lines: JournalEntryLine[]): {
+  isBalanced: boolean;
+  totalDebit: string;
+  totalCredit: string;
+  difference: string;
+} {
+  if (!lines || lines.length === 0) {
+    throw new Error("El asiento contable debe tener al menos una línea");
+  }
+
+  let totalDebit = new Decimal(0);
+  let totalCredit = new Decimal(0);
+
+  for (const line of lines) {
+    const d = new Decimal(line.debit || 0);
+    const c = new Decimal(line.credit || 0);
+
+    if (d.isNegative() || c.isNegative()) {
+      throw new Error(`Los importes de la línea ${line.lineNumber} no pueden ser negativos`);
+    }
+    if (d.isPositive() && c.isPositive() && !d.isZero() && !c.isZero()) {
+      throw new Error(
+        `La línea ${line.lineNumber} no puede tener importes simultáneos en el Debe y en el Haber`
+      );
+    }
+
+    totalDebit = totalDebit.plus(d);
+    totalCredit = totalCredit.plus(c);
+  }
+
+  const diff = totalDebit.minus(totalCredit).abs();
+  const isBalanced = diff.lessThan(0.005);
+
+  return {
+    isBalanced,
+    totalDebit: totalDebit.toFixed(2),
+    totalCredit: totalCredit.toFixed(2),
+    difference: diff.toFixed(2),
+  };
+}
+
+/**
+ * Genera asiento contable automático a partir de un comprobante de venta (Factura 01, Boleta 03 o Nota de Crédito 07)
+ */
+export function buildSaleJournalEntry(
+  cpe: Pick<
+    CpeRecord,
+    | "id"
+    | "companyId"
+    | "fullNumber"
+    | "cpeType"
+    | "series"
+    | "correlative"
+    | "issueDate"
+    | "currency"
+    | "clientDocNumber"
+    | "clientName"
+    | "subTotal"
+    | "montoIgv"
+    | "totalPagar"
+  >,
+  config?: Partial<AccountingAutomationConfig>
+): CreateJournalEntryInput {
+  const cfg = { ...DEFAULT_ACCOUNTING_CONFIG, ...config };
+  const period = cpe.issueDate.substring(0, 7); // YYYY-MM
+  const isCreditNote = cpe.cpeType === "07";
+  const cpeName = cpe.cpeType === "01" ? "Factura" : cpe.cpeType === "03" ? "Boleta" : "Nota de Crédito";
+
+  const subTotal = new Decimal(cpe.subTotal || 0);
+  const montoIgv = new Decimal(cpe.montoIgv || 0);
+  const totalPagar = new Decimal(cpe.totalPagar || 0);
+
+  const lines: CreateJournalEntryInput["lines"] = [];
+
+  const originDoc: OriginDocumentReference = {
+    type: "CPE_SALE",
+    documentId: cpe.id,
+    cpeType: cpe.cpeType,
+    series: cpe.series,
+    correlative: cpe.correlative,
+    fullNumber: cpe.fullNumber,
+    entityDocNumber: cpe.clientDocNumber,
+    entityName: cpe.clientName,
+  };
+
+  if (isCreditNote) {
+    // NOTA DE CRÉDITO: Disminución de ingresos y de la cuenta por cobrar
+    // Debe: 70121 (Venta revertida)
+    lines.push({
+      accountCode: cfg.defaultSaleAccountMerchandise,
+      accountName: resolveAccountName(cfg.defaultSaleAccountMerchandise),
+      debit: round2(subTotal),
+      credit: "0.00",
+      glosa: `Anulación/Ajuste por ${cpeName} ${cpe.fullNumber}`,
+      referenceDoc: cpe.fullNumber,
+    });
+
+    // Debe: 40111 (IGV débito revertido)
+    if (montoIgv.greaterThan(0)) {
+      lines.push({
+        accountCode: cfg.defaultIgvAccount,
+        accountName: resolveAccountName(cfg.defaultIgvAccount),
+        debit: round2(montoIgv),
+        credit: "0.00",
+        glosa: `Reversión IGV por ${cpeName} ${cpe.fullNumber}`,
+        referenceDoc: cpe.fullNumber,
+      });
+    }
+
+    // Haber: 1212 (Cuentas por cobrar disminuidas)
+    lines.push({
+      accountCode: cfg.defaultReceivableAccount,
+      accountName: resolveAccountName(cfg.defaultReceivableAccount),
+      debit: "0.00",
+      credit: round2(totalPagar),
+      glosa: `Reversión cuenta por cobrar ${cpeName} ${cpe.fullNumber}`,
+      referenceDoc: cpe.fullNumber,
+    });
+  } else {
+    // FACTURA O BOLETA DE VENTA
+    // Debe: 1212 (Cuentas por cobrar)
+    lines.push({
+      accountCode: cfg.defaultReceivableAccount,
+      accountName: resolveAccountName(cfg.defaultReceivableAccount),
+      debit: round2(totalPagar),
+      credit: "0.00",
+      glosa: `Por cobrar según ${cpeName} ${cpe.fullNumber} - ${cpe.clientName}`,
+      referenceDoc: cpe.fullNumber,
+    });
+
+    // Haber: 40111 (IGV Cuenta Propia)
+    if (montoIgv.greaterThan(0)) {
+      lines.push({
+        accountCode: cfg.defaultIgvAccount,
+        accountName: resolveAccountName(cfg.defaultIgvAccount),
+        debit: "0.00",
+        credit: round2(montoIgv),
+        glosa: `IGV por venta ${cpe.fullNumber}`,
+        referenceDoc: cpe.fullNumber,
+      });
+    }
+
+    // Haber: 70121 (Venta neta)
+    lines.push({
+      accountCode: cfg.defaultSaleAccountMerchandise,
+      accountName: resolveAccountName(cfg.defaultSaleAccountMerchandise),
+      debit: "0.00",
+      credit: round2(subTotal),
+      glosa: `Venta según ${cpeName} ${cpe.fullNumber}`,
+      referenceDoc: cpe.fullNumber,
+    });
+  }
+
+  return {
+    companyId: cpe.companyId,
+    accountingPeriod: period,
+    entryDate: cpe.issueDate,
+    glosa: `Por la emisión de ${cpeName} ${cpe.fullNumber} a ${cpe.clientName}`,
+    currency: cpe.currency,
+    originDocument: originDoc,
+    lines,
+  };
+}
+
+/**
+ * Genera asiento contable automático de compras (Provisión por Naturaleza y Asiento de Destino)
+ */
+export function buildPurchaseJournalEntries(
+  purchase: PurchaseDocumentRecord,
+  config?: Partial<AccountingAutomationConfig>
+): {
+  provisionEntry: CreateJournalEntryInput;
+  destinationEntry?: CreateJournalEntryInput;
+} {
+  const cfg = { ...DEFAULT_ACCOUNTING_CONFIG, ...config };
+  const period = purchase.accountingPeriod;
+  const supplierName = purchase.supplier.name;
+  const docRef = `${purchase.docType === "01" ? "Factura" : "Boleta"} ${purchase.fullNumber}`;
+
+  // 1. ASIENTO DE PROVISIÓN (NATURALEZA)
+  const baseGravada = new Decimal(purchase.totals.baseGravadaExclusiva || 0)
+    .plus(new Decimal(purchase.totals.baseGravadaComun || 0));
+  const baseSinCredito = new Decimal(purchase.totals.baseGravadaSinCredito || 0);
+  const noGravadas = new Decimal(purchase.totals.adquisicionesNoGravadas || 0);
+  
+  // IGV con crédito fiscal
+  const igvConCredito = new Decimal(purchase.totals.igvGravadoExclusivo || 0)
+    .plus(new Decimal(purchase.totals.igvGravadoComun || 0));
+  
+  // IGV sin derecho a crédito fiscal (Art. 69 LIGV: se incorpora al costo/gasto)
+  const igvSinCredito = new Decimal(purchase.totals.igvGravadoSinCredito || 0);
+
+  // Total costo/gasto neto para la cuenta 60/63
+  const totalGastoNeto = baseGravada.plus(baseSinCredito).plus(noGravadas).plus(igvSinCredito);
+  const totalPagar = new Decimal(purchase.totals.totalAdquisicion || 0);
+
+  const originDoc: OriginDocumentReference = {
+    type: "PURCHASE",
+    documentId: purchase.id,
+    cpeType: purchase.docType,
+    series: purchase.series,
+    correlative: purchase.correlative,
+    fullNumber: purchase.fullNumber,
+    entityDocNumber: purchase.supplier.docNumber,
+    entityName: supplierName,
+  };
+
+  const isMerchandise = purchase.items.some(
+    (item) => !item.classification || item.classification === "1"
+  );
+  const expenseAccount = isMerchandise
+    ? cfg.defaultPurchaseAccountMerchandise
+    : "6321"; // Asesoría/servicios
+
+  const provisionLines: CreateJournalEntryInput["lines"] = [];
+
+  // Debe: 6011 / 63xx (Costo o Gasto por naturaleza)
+  provisionLines.push({
+    accountCode: expenseAccount,
+    accountName: resolveAccountName(expenseAccount),
+    debit: round2(totalGastoNeto),
+    credit: "0.00",
+    glosa: `Compra/Gasto según ${docRef} de ${supplierName}`,
+    referenceDoc: purchase.fullNumber,
+  });
+
+  // Debe: 40111 (IGV Crédito Fiscal)
+  if (igvConCredito.greaterThan(0)) {
+    provisionLines.push({
+      accountCode: cfg.defaultIgvAccount,
+      accountName: resolveAccountName(cfg.defaultIgvAccount),
+      debit: round2(igvConCredito),
+      credit: "0.00",
+      glosa: `IGV Crédito Fiscal por ${docRef}`,
+      referenceDoc: purchase.fullNumber,
+    });
+  }
+
+  // Haber: 4212 (Cuentas por pagar comerciales)
+  provisionLines.push({
+    accountCode: cfg.defaultPayableAccount,
+    accountName: resolveAccountName(cfg.defaultPayableAccount),
+    debit: "0.00",
+    credit: round2(totalPagar),
+    glosa: `Por pagar según ${docRef} a ${supplierName}`,
+    referenceDoc: purchase.fullNumber,
+  });
+
+  const provisionEntry: CreateJournalEntryInput = {
+    companyId: purchase.companyRuc,
+    accountingPeriod: period,
+    entryDate: purchase.issueDate,
+    glosa: `Por la provisión de compra según ${docRef} - ${supplierName}`,
+    currency: purchase.currency,
+    originDocument: originDoc,
+    lines: provisionLines,
+  };
+
+  // 2. ASIENTO DE DESTINO (TRANSFERENCIA)
+  let destinationEntry: CreateJournalEntryInput | undefined;
+
+  if (isMerchandise) {
+    const destinationLines: CreateJournalEntryInput["lines"] = [
+      {
+        accountCode: cfg.defaultInventoryAccount,
+        accountName: resolveAccountName(cfg.defaultInventoryAccount),
+        debit: round2(totalGastoNeto),
+        credit: "0.00",
+        glosa: `Ingreso al almacén por compra ${docRef}`,
+        referenceDoc: purchase.fullNumber,
+      },
+      {
+        accountCode: cfg.defaultInventoryVariationAccount,
+        accountName: resolveAccountName(cfg.defaultInventoryVariationAccount),
+        debit: "0.00",
+        credit: round2(totalGastoNeto),
+        glosa: `Variación de inventarios por compra ${docRef}`,
+        referenceDoc: purchase.fullNumber,
+      },
+    ];
+
+    destinationEntry = {
+      companyId: purchase.companyRuc,
+      accountingPeriod: period,
+      entryDate: purchase.issueDate,
+      glosa: `Por el destino de mercaderías al almacén según ${docRef}`,
+      currency: purchase.currency,
+      originDocument: originDoc,
+      lines: destinationLines,
+    };
+  } else {
+    const adminRatio = new Decimal(cfg.adminExpenseRatio);
+    const sellingRatio = new Decimal(cfg.sellingExpenseRatio);
+    const adminAmount = totalGastoNeto.mul(adminRatio);
+    const sellingAmount = totalGastoNeto.minus(adminAmount);
+
+    const destinationLines: CreateJournalEntryInput["lines"] = [
+      {
+        accountCode: cfg.defaultAdminExpenseAccount,
+        accountName: resolveAccountName(cfg.defaultAdminExpenseAccount),
+        debit: round2(adminAmount),
+        credit: "0.00",
+        glosa: `Gastos de administración por ${docRef}`,
+        referenceDoc: purchase.fullNumber,
+      },
+      {
+        accountCode: cfg.defaultSellingExpenseAccount,
+        accountName: resolveAccountName(cfg.defaultSellingExpenseAccount),
+        debit: round2(sellingAmount),
+        credit: "0.00",
+        glosa: `Gastos de ventas por ${docRef}`,
+        referenceDoc: purchase.fullNumber,
+      },
+      {
+        accountCode: cfg.defaultImputableExpenseAccount,
+        accountName: resolveAccountName(cfg.defaultImputableExpenseAccount),
+        debit: "0.00",
+        credit: round2(totalGastoNeto),
+        glosa: `Cargas imputables por gastos de ${docRef}`,
+        referenceDoc: purchase.fullNumber,
+      },
+    ];
+
+    destinationEntry = {
+      companyId: purchase.companyRuc,
+      accountingPeriod: period,
+      entryDate: purchase.issueDate,
+      glosa: `Por el destino de gastos de administración y ventas según ${docRef}`,
+      currency: purchase.currency,
+      originDocument: originDoc,
+      lines: destinationLines,
+    };
+  }
+
+  return { provisionEntry, destinationEntry };
+}
+
+/**
+ * Genera asiento contable de tesorería (Cobranza a cliente o Pago a proveedor)
+ */
+export function buildTreasuryJournalEntry(params: {
+  companyId: string;
+  type: "COLLECTION" | "PAYMENT";
+  amount: number | string;
+  date: string;
+  treasuryAccount?: "101" | "1041";
+  referenceDoc: string;
+  entityName: string;
+  glosa?: string;
+  currency?: "PEN" | "USD";
+}): CreateJournalEntryInput {
+  const period = params.date.substring(0, 7);
+  const amountStr = round2(params.amount);
+  const treasuryAccount = params.treasuryAccount || "1041";
+  const currency = params.currency || "PEN";
+
+  const lines: CreateJournalEntryInput["lines"] = [];
+
+  if (params.type === "COLLECTION") {
+    lines.push({
+      accountCode: treasuryAccount,
+      accountName: resolveAccountName(treasuryAccount),
+      debit: amountStr,
+      credit: "0.00",
+      glosa: `Cobro en ${treasuryAccount === "101" ? "caja" : "cuenta corriente"} de ${params.entityName}`,
+      referenceDoc: params.referenceDoc,
+    });
+    lines.push({
+      accountCode: "1212",
+      accountName: resolveAccountName("1212"),
+      debit: "0.00",
+      credit: amountStr,
+      glosa: `Cancelación cuenta por cobrar según ${params.referenceDoc}`,
+      referenceDoc: params.referenceDoc,
+    });
+  } else {
+    lines.push({
+      accountCode: "4212",
+      accountName: resolveAccountName("4212"),
+      debit: amountStr,
+      credit: "0.00",
+      glosa: `Pago a proveedor ${params.entityName} por ${params.referenceDoc}`,
+      referenceDoc: params.referenceDoc,
+    });
+    lines.push({
+      accountCode: treasuryAccount,
+      accountName: resolveAccountName(treasuryAccount),
+      debit: "0.00",
+      credit: amountStr,
+      glosa: `Salida de ${treasuryAccount === "101" ? "caja" : "cuenta corriente"} por pago`,
+      referenceDoc: params.referenceDoc,
+    });
+  }
+
+  const defaultGlosa =
+    params.type === "COLLECTION"
+      ? `Por la cobranza de comprobante ${params.referenceDoc} - ${params.entityName}`
+      : `Por el pago de comprobante ${params.referenceDoc} a ${params.entityName}`;
+
+  return {
+    companyId: params.companyId,
+    accountingPeriod: period,
+    entryDate: params.date,
+    glosa: params.glosa || defaultGlosa,
+    currency,
+    lines,
+  };
+}
+
+/**
+ * Genera un asiento de ajuste o regularización contable para el cierre mensual
+ */
+export function buildMonthlyAdjustmentEntry(params: {
+  companyId: string;
+  period: string;
+  entryDate: string;
+  glosa: string;
+  lines: Array<{
+    accountCode: string;
+    accountName?: string;
+    debit?: number | string;
+    credit?: number | string;
+    glosa?: string;
+  }>;
+}): CreateJournalEntryInput {
+  return {
+    companyId: params.companyId,
+    accountingPeriod: params.period,
+    entryDate: params.entryDate,
+    glosa: params.glosa,
+    originDocument: {
+      type: "CLOSING",
+      documentId: `close_adj_${params.companyId}_${params.period}`,
+    },
+    lines: params.lines.map((l) => ({
+      accountCode: l.accountCode,
+      accountName: resolveAccountName(l.accountCode, l.accountName),
+      debit: round2(l.debit ?? 0),
+      credit: round2(l.credit ?? 0),
+      glosa: l.glosa || params.glosa,
+    })),
+  };
+}

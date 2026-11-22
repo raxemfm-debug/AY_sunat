@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { calculateCpe, calculateMonthlySettlement, numberToWordsPeru } from '../index.js';
+import { calculateCpe, calculateMonthlySettlement, numberToWordsPeru, createInitialTaxSetup, INITIAL_TAX_REGIME_OPTIONS } from '../index.js';
 
 const baseCpe = {
   company: {
     ruc: '10445533811',
     legalName: 'Jose Barrientos',
-    taxRegime: 'MYPE_TRIBUTARIO' as const,
+    taxRegime: 'RMT' as const,
     address: { ubigeo: '150101', department: 'Lima', province: 'Lima', district: 'Lima', addressLine: 'Av. Ejemplo 123' },
   },
   client: { docType: '1' as const, docNumber: '12345678', name: 'Cliente Ejemplo' },
@@ -48,6 +48,7 @@ describe('Preliquidación mensual RMT', () => {
   it('aplica 1% antes de superar 300 UIT e IGV neto', () => {
     const result = calculateMonthlySettlement({
       period: '2026-01',
+      regime: 'RMT',
       accumulatedNetRevenueBeforePeriod: '0',
       salesTaxableBase: '10000',
       salesIgv: '1800',
@@ -63,6 +64,7 @@ describe('Preliquidación mensual RMT', () => {
   it('aplica 1.5% cuando los ingresos acumulados exceden 300 UIT', () => {
     const result = calculateMonthlySettlement({
       period: '2026-01',
+      regime: 'RMT',
       accumulatedNetRevenueBeforePeriod: '1600000',
       salesTaxableBase: '100000',
       salesIgv: '0',
@@ -77,6 +79,7 @@ describe('Preliquidación mensual RMT', () => {
   it('mantiene saldo a favor de IGV cuando el crédito supera débito', () => {
     const result = calculateMonthlySettlement({
       period: '2026-02',
+      regime: 'RMT',
       accumulatedNetRevenueBeforePeriod: '0',
       salesTaxableBase: '1000',
       salesIgv: '180',
@@ -91,5 +94,27 @@ describe('Preliquidación mensual RMT', () => {
 describe('Importe en letras', () => {
   it('convierte PEN a texto', () => {
     expect(numberToWordsPeru('118.50', 'PEN')).toBe('SON: CIENTO DIECIOCHO CON 50/100 SOLES');
+  });
+});
+
+describe('Configuración inicial del régimen tributario', () => {
+  it('no asigna régimen por defecto y exige selección explícita', () => {
+    expect(INITIAL_TAX_REGIME_OPTIONS.map((option) => option.code)).toEqual(['RMT', 'RER', 'RG', 'NRUS']);
+    expect(() => createInitialTaxSetup('PERSONA_NATURAL_CON_NEGOCIO', undefined)).toThrow(/No hay un régimen predeterminado/);
+  });
+
+  it('guarda el régimen seleccionado explícitamente', () => {
+    const setup = createInitialTaxSetup('PERSONA_NATURAL_CON_NEGOCIO', 'RER');
+    expect(setup.regime).toBe('RER');
+    expect(setup.taxpayerType).toBe('PERSONA_NATURAL_CON_NEGOCIO');
+  });
+
+  it('bloquea comprobantes no permitidos por el NRUS', () => {
+    expect(() => calculateCpe({
+      ...baseCpe,
+      company: { ...baseCpe.company, taxRegime: 'NRUS' },
+      cpeType: '01',
+      series: 'F001',
+    })).toThrow(/permite emitir/);
   });
 });

@@ -59,8 +59,10 @@ export function calculateMonthlySettlement(
   const newIncomeCredit = Decimal.max(ZERO, previousIncomeCredit.minus(incomePayment));
 
   return {
+    regimenName: 'Régimen Mype Tributario',
+    regimeName: 'Régimen Mype Tributario',
     period: input.period,
-    regime: 'MYPE_TRIBUTARIO',
+    regime: 'RMT',
     uitApplicable: uit.toFixed(2),
     ventasGravadas: roundMoney(salesBase).toFixed(2),
     debitoFiscalIgv: roundMoney(salesIgv).toFixed(2),

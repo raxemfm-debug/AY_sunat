@@ -4,3 +4,5 @@ export * from './validators.js';
 export * from './cpe-calculator.js';
 export * from './monthly-settlement.js';
 export * from './number-to-words.js';
+
+export * from './initial-setup.js';

@@ -1,0 +1,251 @@
+import { Decimal } from "decimal.js";
+import {
+  CreateJournalEntryInput,
+  GeneralLedger,
+  GeneralLedgerAccount,
+  GeneralLedgerMovement,
+  JournalEntry,
+  JournalEntryLine,
+  TrialBalance,
+  TrialBalanceRow,
+} from "./types.js";
+import { resolveAccountName } from "./pcge-catalog.js";
+import { validateJournalEntryBalance } from "./entry-builder.js";
+
+Decimal.set({ precision: 24, rounding: Decimal.ROUND_HALF_UP });
+
+const round2 = (val: Decimal | number | string): string => {
+  return new Decimal(val).toFixed(2);
+};
+
+export class AccountingService {
+  private entries: JournalEntry[] = [];
+  private entrySequenceByPeriod: Map<string, number> = new Map();
+
+  constructor(initialEntries?: JournalEntry[]) {
+    if (initialEntries && initialEntries.length > 0) {
+      for (const e of initialEntries) {
+        this.registerEntry(e);
+      }
+    }
+  }
+
+  /**
+   * Registra un nuevo asiento contable en el Libro Diario validando su balance y asignando correlativo
+   */
+  public registerEntry(input: CreateJournalEntryInput | JournalEntry): JournalEntry {
+    if (!input.lines || input.lines.length === 0) {
+      throw new Error("No se puede registrar un asiento contable sin líneas");
+    }
+
+    // Normalizar líneas asignando número de línea y resolviendo nombre de cuenta
+    const processedLines: JournalEntryLine[] = input.lines.map((l, index) => {
+      const debitStr = round2(l.debit ?? 0);
+      const creditStr = round2(l.credit ?? 0);
+      return {
+        lineNumber: index + 1,
+        accountCode: l.accountCode.trim(),
+        accountName: resolveAccountName(l.accountCode, l.accountName),
+        debit: debitStr,
+        credit: creditStr,
+        glosa: l.glosa,
+        costCenter: l.costCenter,
+        referenceDoc: l.referenceDoc,
+      };
+    });
+
+    // Validar partida doble innegociable
+    const balance = validateJournalEntryBalance(processedLines);
+    if (!balance.isBalanced) {
+      throw new Error(
+        `Asiento contable desbalanceado: Total Debe (${balance.totalDebit}) no es igual a Total Haber (${balance.totalCredit}). Diferencia: ${balance.difference}`
+      );
+    }
+
+    const periodKey = `${input.companyId}_${input.accountingPeriod}`;
+    const nextSeq = (this.entrySequenceByPeriod.get(periodKey) || 0) + 1;
+    this.entrySequenceByPeriod.set(periodKey, nextSeq);
+
+    const entryId =
+      "id" in input && input.id ? input.id : `entry_${input.companyId}_${input.accountingPeriod}_${nextSeq}`;
+
+    const journalEntry: JournalEntry = {
+      id: entryId,
+      companyId: input.companyId,
+      accountingPeriod: input.accountingPeriod,
+      entryNumber: "entryNumber" in input && input.entryNumber ? input.entryNumber : nextSeq,
+      entryDate: input.entryDate,
+      glosa: input.glosa,
+      currency: input.currency || "PEN",
+      exchangeRate: input.exchangeRate,
+      originDocument: input.originDocument,
+      lines: processedLines,
+      totalDebit: balance.totalDebit,
+      totalCredit: balance.totalCredit,
+      isBalanced: true,
+      createdAt: "createdAt" in input && input.createdAt ? input.createdAt : new Date().toISOString(),
+    };
+
+    this.entries.push(journalEntry);
+    return journalEntry;
+  }
+
+  /**
+   * Obtiene todos los asientos del Libro Diario para una empresa y periodo opcional
+   */
+  public getJournalEntries(companyId: string, period?: string): JournalEntry[] {
+    return this.entries.filter((e) => {
+      if (e.companyId !== companyId) return false;
+      if (period && e.accountingPeriod !== period) return false;
+      return true;
+    });
+  }
+
+  /**
+   * Busca un asiento por su documento de origen
+   */
+  public getEntryByOriginDocument(
+    companyId: string,
+    documentId: string
+  ): JournalEntry | undefined {
+    return this.entries.find(
+      (e) => e.companyId === companyId && e.originDocument?.documentId === documentId
+    );
+  }
+
+  /**
+   * Genera el Libro Mayor (General Ledger) agrupando movimientos por cuenta contable
+   */
+  public generateGeneralLedger(companyId: string, period: string): GeneralLedger {
+    const periodEntries = this.getJournalEntries(companyId, period).sort(
+      (a, b) => a.entryNumber - b.entryNumber
+    );
+
+    const accountMap = new Map<
+      string,
+      {
+        accountCode: string;
+        accountName: string;
+        movements: GeneralLedgerMovement[];
+        totalDebit: Decimal;
+        totalCredit: Decimal;
+      }
+    >();
+
+    let totalPeriodDebit = new Decimal(0);
+    let totalPeriodCredit = new Decimal(0);
+
+    for (const entry of periodEntries) {
+      for (const line of entry.lines) {
+        let accData = accountMap.get(line.accountCode);
+        if (!accData) {
+          accData = {
+            accountCode: line.accountCode,
+            accountName: line.accountName,
+            movements: [],
+            totalDebit: new Decimal(0),
+            totalCredit: new Decimal(0),
+          };
+          accountMap.set(line.accountCode, accData);
+        }
+
+        const debitDec = new Decimal(line.debit);
+        const creditDec = new Decimal(line.credit);
+
+        accData.totalDebit = accData.totalDebit.plus(debitDec);
+        accData.totalCredit = accData.totalCredit.plus(creditDec);
+
+        totalPeriodDebit = totalPeriodDebit.plus(debitDec);
+        totalPeriodCredit = totalPeriodCredit.plus(creditDec);
+
+        const currentNetBalance = accData.totalDebit.minus(accData.totalCredit);
+
+        accData.movements.push({
+          entryNumber: entry.entryNumber,
+          entryDate: entry.entryDate,
+          glosa: line.glosa || entry.glosa,
+          debit: line.debit,
+          credit: line.credit,
+          runningBalance: round2(currentNetBalance),
+        });
+      }
+    }
+
+    // Convertir a lista ordenada por código de cuenta
+    const accounts: GeneralLedgerAccount[] = Array.from(accountMap.values())
+      .sort((a, b) => a.accountCode.localeCompare(b.accountCode))
+      .map((acc) => {
+        const net = acc.totalDebit.minus(acc.totalCredit);
+        const isDebtor = net.greaterThan(0);
+        const isCreditor = net.lessThan(0);
+
+        return {
+          accountCode: acc.accountCode,
+          accountName: acc.accountName,
+          totalDebit: round2(acc.totalDebit),
+          totalCredit: round2(acc.totalCredit),
+          debtorBalance: isDebtor ? round2(net) : "0.00",
+          creditorBalance: isCreditor ? round2(net.abs()) : "0.00",
+          movements: acc.movements,
+        };
+      });
+
+    return {
+      companyId,
+      accountingPeriod: period,
+      generatedAt: new Date().toISOString(),
+      totalDebit: round2(totalPeriodDebit),
+      totalCredit: round2(totalPeriodCredit),
+      accounts,
+    };
+  }
+
+  /**
+   * Genera el Balance de Comprobación (Sumas y Saldos)
+   */
+  public generateTrialBalance(companyId: string, period: string): TrialBalance {
+    const ledger = this.generateGeneralLedger(companyId, period);
+
+    let totalDebitSum = new Decimal(0);
+    let totalCreditSum = new Decimal(0);
+    let totalDebtorBalance = new Decimal(0);
+    let totalCreditorBalance = new Decimal(0);
+
+    const rows: TrialBalanceRow[] = ledger.accounts.map((acc) => {
+      const dSum = new Decimal(acc.totalDebit);
+      const cSum = new Decimal(acc.totalCredit);
+      const dBal = new Decimal(acc.debtorBalance);
+      const cBal = new Decimal(acc.creditorBalance);
+
+      totalDebitSum = totalDebitSum.plus(dSum);
+      totalCreditSum = totalCreditSum.plus(cSum);
+      totalDebtorBalance = totalDebtorBalance.plus(dBal);
+      totalCreditorBalance = totalCreditorBalance.plus(cBal);
+
+      return {
+        accountCode: acc.accountCode,
+        accountName: acc.accountName,
+        debitSum: acc.totalDebit,
+        creditSum: acc.totalCredit,
+        debtorBalance: acc.debtorBalance,
+        creditorBalance: acc.creditorBalance,
+      };
+    });
+
+    const sumDiff = totalDebitSum.minus(totalCreditSum).abs();
+    const balanceDiff = totalDebtorBalance.minus(totalCreditorBalance).abs();
+    const isBalanced = sumDiff.lessThan(0.005) && balanceDiff.lessThan(0.005);
+
+    return {
+      companyId,
+      accountingPeriod: period,
+      generatedAt: new Date().toISOString(),
+      rows,
+      totalDebitSum: round2(totalDebitSum),
+      totalCreditSum: round2(totalCreditSum),
+      totalDebtorBalance: round2(totalDebtorBalance),
+      totalCreditorBalance: round2(totalCreditorBalance),
+      isBalanced,
+    };
+  }
+}

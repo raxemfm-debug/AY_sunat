@@ -1,0 +1,468 @@
+import { PcgeAccount } from "./types.js";
+
+/**
+ * Catálogo estándar del Plan Contable General Empresarial (PCGE 2019)
+ * Resolución CNC N° 002-2019-EF/30
+ */
+export const PCGE_ACCOUNTS: Record<string, PcgeAccount> = {
+  // ELEMENTO 1: ACTIVO DISPONIBLE Y EXIGIBLE
+  "10": {
+    code: "10",
+    name: "Efectivo y equivalentes de efectivo",
+    element: 1,
+    nature: "DEUDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "101": {
+    code: "101",
+    name: "Caja",
+    element: 1,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: true,
+  },
+  "104": {
+    code: "104",
+    name: "Cuentas corrientes en instituciones financieras",
+    element: 1,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "1041": {
+    code: "1041",
+    name: "Cuentas corrientes operativas",
+    element: 1,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+  "12": {
+    code: "12",
+    name: "Cuentas por cobrar comerciales - Terceros",
+    element: 1,
+    nature: "DEUDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "121": {
+    code: "121",
+    name: "Facturas, boletas y otros comprobantes por cobrar",
+    element: 1,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "1212": {
+    code: "1212",
+    name: "Facturas, boletas y otros comprobantes por cobrar - Emitidas en cartera",
+    element: 1,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+  "1213": {
+    code: "1213",
+    name: "Facturas, boletas y otros comprobantes por cobrar - En cobranza",
+    element: 1,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+  "16": {
+    code: "16",
+    name: "Cuentas por cobrar diversas - Terceros",
+    element: 1,
+    nature: "DEUDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "167": {
+    code: "167",
+    name: "Tributos por acreditar",
+    element: 1,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "1673": {
+    code: "1673",
+    name: "IGV por acreditar en compras",
+    element: 1,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+
+  // ELEMENTO 2: ACTIVO REALIZABLE (INVENTARIOS)
+  "20": {
+    code: "20",
+    name: "Mercaderías",
+    element: 2,
+    nature: "DEUDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "201": {
+    code: "201",
+    name: "Mercaderías manufacturadas",
+    element: 2,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "2011": {
+    code: "2011",
+    name: "Mercaderías manufacturadas - Costo",
+    element: 2,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: false,
+  },
+  "20111": {
+    code: "20111",
+    name: "Mercaderías manufacturadas - Costo (Almacén principal)",
+    element: 2,
+    nature: "DEUDORA",
+    level: "SUBDIVISIONARIA",
+    isMoveable: true,
+  },
+
+  // ELEMENTO 4: PASIVO (TRIBUTOS Y CUENTAS POR PAGAR)
+  "40": {
+    code: "40",
+    name: "Tributos, contraprestaciones y aportes al sistema público de pensiones y de salud por pagar",
+    element: 4,
+    nature: "ACREEDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "401": {
+    code: "401",
+    name: "Gobierno nacional",
+    element: 4,
+    nature: "ACREEDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "4011": {
+    code: "4011",
+    name: "Impuesto general a las ventas",
+    element: 4,
+    nature: "ACREEDORA",
+    level: "DIVISIONARIA",
+    isMoveable: false,
+  },
+  "40111": {
+    code: "40111",
+    name: "IGV - Cuenta propia",
+    element: 4,
+    nature: "ACREEDORA",
+    level: "SUBDIVISIONARIA",
+    isMoveable: true,
+  },
+  "4017": {
+    code: "4017",
+    name: "Impuesto a la renta",
+    element: 4,
+    nature: "ACREEDORA",
+    level: "DIVISIONARIA",
+    isMoveable: false,
+  },
+  "40171": {
+    code: "40171",
+    name: "Renta de tercera categoría (Pagos a cuenta)",
+    element: 4,
+    nature: "ACREEDORA",
+    level: "SUBDIVISIONARIA",
+    isMoveable: true,
+  },
+  "42": {
+    code: "42",
+    name: "Cuentas por pagar comerciales - Terceros",
+    element: 4,
+    nature: "ACREEDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "421": {
+    code: "421",
+    name: "Facturas, boletas y otros comprobantes por pagar",
+    element: 4,
+    nature: "ACREEDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "4212": {
+    code: "4212",
+    name: "Facturas, boletas y otros comprobantes por pagar - Emitidas",
+    element: 4,
+    nature: "ACREEDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+
+  // ELEMENTO 6: GASTOS POR NATURALEZA
+  "60": {
+    code: "60",
+    name: "Compras",
+    element: 6,
+    nature: "DEUDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "601": {
+    code: "601",
+    name: "Mercaderías",
+    element: 6,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "6011": {
+    code: "6011",
+    name: "Mercaderías manufacturadas",
+    element: 6,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+  "61": {
+    code: "61",
+    name: "Variación de inventarios",
+    element: 6,
+    nature: "ACREEDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "611": {
+    code: "611",
+    name: "Mercaderías",
+    element: 6,
+    nature: "ACREEDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "6111": {
+    code: "6111",
+    name: "Mercaderías manufacturadas",
+    element: 6,
+    nature: "ACREEDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+  "63": {
+    code: "63",
+    name: "Gastos de servicios prestados por terceros",
+    element: 6,
+    nature: "DEUDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "631": {
+    code: "631",
+    name: "Transporte, correos y gastos de viaje",
+    element: 6,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "6311": {
+    code: "6311",
+    name: "Transporte de carga",
+    element: 6,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+  "632": {
+    code: "632",
+    name: "Asesoría y consultoría",
+    element: 6,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "6321": {
+    code: "6321",
+    name: "Auditoría y consultoría",
+    element: 6,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+  "636": {
+    code: "636",
+    name: "Servicios básicos",
+    element: 6,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "6361": {
+    code: "6361",
+    name: "Energía eléctrica",
+    element: 6,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+  "6363": {
+    code: "6363",
+    name: "Agua",
+    element: 6,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+  "6364": {
+    code: "6364",
+    name: "Teléfono e internet",
+    element: 6,
+    nature: "DEUDORA",
+    level: "DIVISIONARIA",
+    isMoveable: true,
+  },
+  "65": {
+    code: "65",
+    name: "Otros gastos de gestión",
+    element: 6,
+    nature: "DEUDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "659": {
+    code: "659",
+    name: "Otros gastos de gestión diversos",
+    element: 6,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: true,
+  },
+
+  // ELEMENTO 7: INGRESOS POR NATURALEZA
+  "70": {
+    code: "70",
+    name: "Ventas",
+    element: 7,
+    nature: "ACREEDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "701": {
+    code: "701",
+    name: "Mercaderías",
+    element: 7,
+    nature: "ACREEDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "7012": {
+    code: "7012",
+    name: "Mercaderías - Venta local",
+    element: 7,
+    nature: "ACREEDORA",
+    level: "DIVISIONARIA",
+    isMoveable: false,
+  },
+  "70121": {
+    code: "70121",
+    name: "Mercaderías - Terceros (Venta local)",
+    element: 7,
+    nature: "ACREEDORA",
+    level: "SUBDIVISIONARIA",
+    isMoveable: true,
+  },
+  "702": {
+    code: "702",
+    name: "Servicios terminados",
+    element: 7,
+    nature: "ACREEDORA",
+    level: "SUBCUENTA",
+    isMoveable: false,
+  },
+  "70221": {
+    code: "70221",
+    name: "Servicios terminados - Terceros (Venta local)",
+    element: 7,
+    nature: "ACREEDORA",
+    level: "SUBDIVISIONARIA",
+    isMoveable: true,
+  },
+  "79": {
+    code: "79",
+    name: "Cargas imputables a cuentas de costos y gastos",
+    element: 7,
+    nature: "ACREEDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "791": {
+    code: "791",
+    name: "Cargas imputables a cuentas de costos y gastos",
+    element: 7,
+    nature: "ACREEDORA",
+    level: "SUBCUENTA",
+    isMoveable: true,
+  },
+
+  // ELEMENTO 9: CONTABILIDAD ANALÍTICA DE EXPLOTACIÓN (COSTOS Y GASTOS POR FUNCIÓN)
+  "94": {
+    code: "94",
+    name: "Gastos administrativos",
+    element: 9,
+    nature: "DEUDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "941": {
+    code: "941",
+    name: "Gastos de administración",
+    element: 9,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: true,
+  },
+  "95": {
+    code: "95",
+    name: "Gastos de ventas",
+    element: 9,
+    nature: "DEUDORA",
+    level: "CUENTA",
+    isMoveable: false,
+  },
+  "951": {
+    code: "951",
+    name: "Gastos de comercialización y ventas",
+    element: 9,
+    nature: "DEUDORA",
+    level: "SUBCUENTA",
+    isMoveable: true,
+  },
+};
+
+/**
+ * Obtiene la cuenta PCGE por su código o lanza error si no existe
+ */
+export function getPcgeAccount(code: string): PcgeAccount {
+  const account = PCGE_ACCOUNTS[code];
+  if (!account) {
+    throw new Error(`Cuenta contable PCGE no encontrada en el catálogo: ${code}`);
+  }
+  return account;
+}
+
+/**
+ * Valida si el código existe y obtiene su nombre (o un default si se permite cuenta personalizada)
+ */
+export function resolveAccountName(code: string, customName?: string): string {
+  if (customName && customName.trim().length > 0) {
+    return customName.trim();
+  }
+  const account = PCGE_ACCOUNTS[code];
+  if (account) {
+    return account.name;
+  }
+  return `Cuenta ${code}`;
+}
