@@ -1,0 +1,203 @@
+import { CurrencyCode } from "../../core/tax-engine/types.js";
+
+export type AccountNature = "DEUDORA" | "ACREEDORA";
+
+export interface PcgeAccount {
+  code: string;
+  name: string;
+  element: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  nature: AccountNature;
+  level: "ELEMENTO" | "CUENTA" | "SUBCUENTA" | "DIVISIONARIA" | "SUBDIVISIONARIA";
+  isMoveable: boolean; // Solo se puede asentar en cuentas con movimiento (subdivisionarias o cuentas terminales)
+}
+
+export type OriginDocumentType =
+  | "CPE_SALE" // Factura, Boleta o Nota de Crédito emitida
+  | "PURCHASE" // Comprobante de compra / gasto
+  | "COLLECTION" // Cobro a cliente
+  | "PAYMENT" // Pago a proveedor
+  | "OPENING" // Asiento de apertura
+  | "ADJUSTMENT" // Asiento de ajuste / regularización
+  | "CLOSING" // Asiento de cierre / regularización mensual o anual
+  | "MANUAL"; // Asiento manual
+
+export interface OriginDocumentReference {
+  type: OriginDocumentType;
+  documentId: string;
+  cpeType?: string; // "01", "03", "07", "08"
+  series?: string;
+  correlative?: string | number;
+  fullNumber?: string;
+  entityDocNumber?: string;
+  entityName?: string;
+}
+
+export interface JournalEntryLine {
+  lineNumber: number;
+  accountCode: string;
+  accountName: string;
+  debit: string; // "0.00"
+  credit: string; // "0.00"
+  glosa?: string;
+  costCenter?: string;
+  referenceDoc?: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  companyId: string;
+  accountingPeriod: string; // "YYYY-MM"
+  entryNumber: number; // Correlativo de asiento
+  entryDate: string; // "YYYY-MM-DD"
+  glosa: string; // Explicación de la operación
+  currency: CurrencyCode;
+  exchangeRate?: string;
+  originDocument?: OriginDocumentReference;
+  lines: JournalEntryLine[];
+  totalDebit: string;
+  totalCredit: string;
+  isBalanced: boolean;
+  isOpening?: boolean;
+  isClosing?: boolean;
+  createdAt: string;
+}
+
+export interface CreateJournalEntryInput {
+  companyId: string;
+  accountingPeriod: string;
+  entryDate: string;
+  glosa: string;
+  currency?: CurrencyCode;
+  exchangeRate?: string;
+  originDocument?: OriginDocumentReference;
+  lines: Array<{
+    accountCode: string;
+    accountName?: string;
+    debit?: number | string;
+    credit?: number | string;
+    glosa?: string;
+    costCenter?: string;
+    referenceDoc?: string;
+  }>;
+}
+
+// Configuración contable para generar asientos automáticos
+export interface AccountingAutomationConfig {
+  defaultReceivableAccount?: string; // Por defecto: "1212"
+  defaultPayableAccount?: string; // Por defecto: "4212"
+  defaultIgvAccount?: string; // Por defecto: "40111"
+  defaultSaleAccountMerchandise?: string; // Por defecto: "70121"
+  defaultSaleAccountServices?: string; // Por defecto: "70221"
+  defaultPurchaseAccountMerchandise?: string; // Por defecto: "6011"
+  defaultInventoryAccount?: string; // Por defecto: "20111"
+  defaultInventoryVariationAccount?: string; // Por defecto: "6111"
+  defaultAdminExpenseAccount?: string; // Por defecto: "941"
+  defaultSellingExpenseAccount?: string; // Por defecto: "951"
+  defaultImputableExpenseAccount?: string; // Por defecto: "791"
+  adminExpenseRatio?: number; // Porcentaje a gastos adm (ej. 0.50 para 50%)
+  sellingExpenseRatio?: number; // Porcentaje a gastos venta (ej. 0.50 para 50%)
+}
+
+// Libro Mayor
+export interface GeneralLedgerMovement {
+  entryNumber: number;
+  entryDate: string;
+  glosa: string;
+  debit: string;
+  credit: string;
+  runningBalance: string;
+}
+
+export interface GeneralLedgerAccount {
+  accountCode: string;
+  accountName: string;
+  totalDebit: string;
+  totalCredit: string;
+  debtorBalance: string; // Saldo deudor
+  creditorBalance: string; // Saldo acreedor
+  movements: GeneralLedgerMovement[];
+}
+
+export interface GeneralLedger {
+  companyId: string;
+  accountingPeriod: string;
+  generatedAt: string;
+  totalDebit: string;
+  totalCredit: string;
+  accounts: GeneralLedgerAccount[];
+}
+
+// Balance de Comprobación (Sumas y Saldos)
+export interface TrialBalanceRow {
+  accountCode: string;
+  accountName: string;
+  debitSum: string; // Sumas del Mayor: Debe
+  creditSum: string; // Sumas del Mayor: Haber
+  debtorBalance: string; // Saldos: Deudor
+  creditorBalance: string; // Saldos: Acreedor
+}
+
+export interface TrialBalance {
+  companyId: string;
+  accountingPeriod: string;
+  generatedAt: string;
+  rows: TrialBalanceRow[];
+  totalDebitSum: string;
+  totalCreditSum: string;
+  totalDebtorBalance: string;
+  totalCreditorBalance: string;
+  isBalanced: boolean;
+}
+
+// Estado del Período Contable y Cierre Mensual
+export type AccountingPeriodStatus = "OPEN" | "CLOSED";
+
+export interface AccountingPeriodRecord {
+  companyId: string;
+  period: string; // "YYYY-MM"
+  status: AccountingPeriodStatus;
+  totalEntries: number;
+  totalDebit: string;
+  totalCredit: string;
+  isBalanced: boolean;
+  closedAt?: string;
+  closedBy?: string;
+  closingNotes?: string;
+  reopenedAt?: string;
+  reopenedBy?: string;
+  reopenReason?: string;
+  trialBalanceSnapshot?: TrialBalance;
+}
+
+export interface CloseAccountingPeriodInput {
+  companyId: string;
+  period: string; // "YYYY-MM"
+  closedBy?: string;
+  notes?: string;
+  allowEmptyPeriod?: boolean;
+}
+
+export interface ReopenAccountingPeriodInput {
+  companyId: string;
+  period: string; // "YYYY-MM"
+  reopenedBy: string;
+  reason: string;
+}
+
+export interface PeriodValidationResult {
+  isValid: boolean;
+  period: string;
+  companyId: string;
+  totalEntries: number;
+  totalDebit: string;
+  totalCredit: string;
+  isDoubleEntryBalanced: boolean;
+  unbalancedEntries: Array<{
+    entryId: string;
+    entryNumber: number;
+    difference: string;
+    totalDebit: string;
+    totalCredit: string;
+  }>;
+  errors: string[];
+}
