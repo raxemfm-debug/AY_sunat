@@ -1,0 +1,4 @@
+project_id = "ai-sunat"
+
+[experimental]
+stack = true
