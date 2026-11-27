@@ -7,3 +7,9 @@ coverage/
 *.log
 *.tsbuildinfo
 *.bak
+
+# Certificados digitales y llaves privadas: nunca a Git
+*.pfx
+*.p12
+*.key
+certs/
