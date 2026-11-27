@@ -1,55 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
-import { createServer, IncomingMessage, Server, ServerResponse } from "node:http";
-import {
-  AnnualCloseApplication,
-  AnnualCloseApplicationError,
-  ConfirmAnnualCloseInput,
-} from "./accounting/annual-close.application.js";
-
-const MAX_BODY_BYTES = 32 * 1024;
-
-function sendJson(response: ServerResponse, status: number, payload: unknown): void {
-  response.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-  });
-  response.end(JSON.stringify(payload));
-}
-
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
-  const contentType = request.headers["content-type"]?.split(";")[0].trim().toLowerCase();
-  if (contentType !== "application/json") {
-    throw new AnnualCloseApplicationError(415, "UNSUPPORTED_MEDIA_TYPE", "Envía el cuerpo como application/json.");
-  }
-
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytes += buffer.length;
-    if (bytes > MAX_BODY_BYTES) {
-      throw new AnnualCloseApplicationError(413, "BODY_TOO_LARGE", "El cuerpo de la solicitud excede el límite permitido.");
-    }
-    chunks.push(buffer);
-  }
-
-  try {
-    const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Expected an object");
-    return body as Record<string, unknown>;
-  } catch {
-    throw new AnnualCloseApplicationError(400, "INVALID_JSON", "El cuerpo JSON no es válido.");
-  }
-}
-
-function requiredString(body: Record<string, unknown>, field: string): string {
-  const value = body[field];
-  if (typeof value !== "string" || !value.trim()) {
-    throw new AnnualCloseApplicationError(400, "INVALID_INPUT", `El campo ${field} es obligatorio.`);
-  }
-  return value.trim();
-}
+import { createServer, IncomingMessage, Server } from "node:http";
+import type { AnnualCloseApplication } from "./accounting/annual-close.application.js";
+import type { ApiServices } from "./app-services.js";
+import { ApiError, sendJson, toApiError } from "./http/http-utils.js";
+import { Router } from "./http/router.js";
+import { registerAccountingRoutes } from "./routes/accounting.routes.js";
+import { registerAnnualCloseRoutes } from "./routes/annual-close.routes.js";
+import { registerCompanyRoutes } from "./routes/companies.routes.js";
+import { registerCpeRoutes } from "./routes/cpe.routes.js";
+import { registerPurchaseRoutes } from "./routes/purchases.routes.js";
 
 function assertBearerToken(request: IncomingMessage, token: string): boolean {
   const value = request.headers.authorization ?? "";
@@ -62,17 +21,37 @@ function isLoopback(host: string): boolean {
   return host === "127.0.0.1" || host === "::1" || host.toLowerCase() === "localhost";
 }
 
-export function createApiServer(input: {
-  application: AnnualCloseApplication;
+export interface ApiServerOptions {
+  /** Cierre anual (rutas existentes /api/accounting/annual-close/*). */
+  application?: AnnualCloseApplication;
+  /** Empresas, emisión, compras y contabilidad persistentes. */
+  services?: ApiServices;
   host: string;
   bearerToken?: string;
-}): Server {
+  /** Registro de errores internos; por defecto stderr. Nunca recibe cuerpos de solicitud. */
+  logError?: (error: unknown, context: { method?: string; path: string }) => void;
+}
+
+export function createApiServer(input: ApiServerOptions): Server {
   if (!isLoopback(input.host) && !input.bearerToken) {
     throw new Error("API_BEARER_TOKEN es obligatorio si la API escucha fuera de loopback.");
   }
 
+  const router = new Router();
+  if (input.application) registerAnnualCloseRoutes(router, input.application);
+  if (input.services) {
+    registerCompanyRoutes(router, input.services);
+    registerCpeRoutes(router, input.services);
+    registerPurchaseRoutes(router, input.services);
+    registerAccountingRoutes(router, input.services);
+  }
+  const logError = input.logError ?? ((error, context) => {
+    console.error(`[api] ${context.method} ${context.path}`, error);
+  });
+
   return createServer(async (request, response) => {
-    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const path = url.pathname;
     if (request.method === "GET" && path === "/health") {
       sendJson(response, 200, { status: "ok" });
       return;
@@ -84,52 +63,16 @@ export function createApiServer(input: {
     }
 
     try {
-      if (request.method === "POST" && path === "/api/accounting/annual-close/preview") {
-        const body = await readJson(request);
-        const companyId = requiredString(body, "companyId");
-        const fiscalYear = requiredString(body, "fiscalYear");
-        if (!/^\d{4}$/.test(fiscalYear)) {
-          throw new AnnualCloseApplicationError(400, "INVALID_INPUT", "fiscalYear debe tener formato YYYY.");
-        }
-        const result = await input.application.preview({
-          companyId,
-          fiscalYear,
-          closingDate: typeof body.closingDate === "string" ? body.closingDate : undefined,
-          closingPeriod: typeof body.closingPeriod === "string" ? body.closingPeriod : undefined,
-          generateNextYearOpening: body.generateNextYearOpening === true,
-        });
-        sendJson(response, 200, result);
-        return;
-      }
-
-      if (request.method === "POST" && path === "/api/accounting/annual-close/confirm") {
-        const body = await readJson(request);
-        const companyId = requiredString(body, "companyId");
-        const fiscalYear = requiredString(body, "fiscalYear");
-        const expectedRevision = body.expectedRevision;
-        if (!/^\d{4}$/.test(fiscalYear) || !Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 0) {
-          throw new AnnualCloseApplicationError(400, "INVALID_INPUT", "fiscalYear o expectedRevision no es válido.");
-        }
-        const result = await input.application.confirm({
-          companyId,
-          fiscalYear,
-          expectedRevision: Number(expectedRevision),
-          closedBy: typeof body.closedBy === "string" ? body.closedBy : undefined,
-          notes: typeof body.notes === "string" ? body.notes : undefined,
-          closingDate: typeof body.closingDate === "string" ? body.closingDate : undefined,
-          closingPeriod: typeof body.closingPeriod === "string" ? body.closingPeriod : undefined,
-          generateNextYearOpening: body.generateNextYearOpening === true,
-        } as ConfirmAnnualCloseInput);
-        sendJson(response, 200, result);
-        return;
-      }
-
-      sendJson(response, 404, { error: { code: "NOT_FOUND", message: "Ruta no encontrada." } });
+      const matched = router.match(request.method ?? "GET", path);
+      if (!matched) throw new ApiError(404, "NOT_FOUND", "Ruta no encontrada.");
+      await matched.handler({ request, response, params: matched.params, query: url.searchParams });
     } catch (error) {
-      if (error instanceof AnnualCloseApplicationError) {
-        sendJson(response, error.statusCode, { error: { code: error.code, message: error.message } });
+      const apiError = toApiError(error);
+      if (apiError) {
+        sendJson(response, apiError.statusCode, { error: { code: apiError.code, message: apiError.message } });
         return;
       }
+      logError(error, { method: request.method, path });
       sendJson(response, 500, { error: { code: "INTERNAL_ERROR", message: "Error interno del servidor." } });
     }
   });

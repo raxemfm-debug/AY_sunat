@@ -100,6 +100,25 @@ export interface CpeEmissionOrchestratorConfig {
   defaultEnvironment?: "beta" | "production";
 }
 
+/** Fecha (YYYY-MM-DD) y hora (HH:mm:ss) en America/Lima. */
+export function limaDateTime(instant: Date): { date: string; time: string } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Lima",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(instant)
+      .map((part) => [part.type, part.value]),
+  );
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}:${parts.second}` };
+}
+
 export class CpeEmissionOrchestrator {
   private companyRepo: ICompanyRepository;
   private companyService?: CompanyService;
@@ -152,9 +171,10 @@ export class CpeEmissionOrchestrator {
       request.series,
     );
 
-    const now = new Date();
-    const issueDate = request.issueDate || now.toISOString().slice(0, 10);
-    const issueTime = request.issueTime || now.toTimeString().slice(0, 8);
+    // Fecha y hora oficiales de Perú (UTC-5), independientes de la zona horaria del servidor.
+    const limaNow = limaDateTime(new Date());
+    const issueDate = request.issueDate || limaNow.date;
+    const issueTime = request.issueTime || limaNow.time;
 
     // 3. Preparar payload normativo para el motor de cálculo
     const cpeInput: CpeDocumentInput = {
