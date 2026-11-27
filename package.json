@@ -9,7 +9,8 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "build": "tsc",
     "api:dev": "node --env-file=.env --import tsx src/api/main.ts",
-    "api:start": "node --env-file=.env dist/api/main.js"
+    "api:start": "node --env-file=.env dist/api/main.js",
+    "test:db": "vitest run src/database"
   },
   "keywords": [],
   "author": "",

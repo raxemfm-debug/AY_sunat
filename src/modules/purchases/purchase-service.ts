@@ -38,6 +38,27 @@ export class PurchaseService {
   private purchasesByPeriodKey: Map<string, PurchaseDocumentRecord> = new Map();
   private suppliers: Map<string, SupplierProfile> = new Map();
 
+  /**
+   * Carga registros ya persistidos (por ejemplo, desde PostgreSQL) para reutilizar
+   * los resúmenes y validaciones en memoria sin recalcular los comprobantes.
+   */
+  public loadRecords(records: PurchaseDocumentRecord[]): void {
+    for (const record of records) {
+      const key = normalizeDuplicateKey(
+        record.supplier.docNumber,
+        record.docType,
+        record.series,
+        record.correlative,
+        record.accountingPeriod
+      );
+      this.purchases.set(record.car, record);
+      this.purchasesByPeriodKey.set(key, record);
+      if (!this.suppliers.has(record.supplier.docNumber)) {
+        this.suppliers.set(record.supplier.docNumber, record.supplier);
+      }
+    }
+  }
+
   public registerSupplier(supplier: SupplierProfile): SupplierProfile {
     const rucErrors = validateRuc(supplier.docNumber);
     if (supplier.docType === "6" && rucErrors.length > 0) {
