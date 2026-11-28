@@ -1,7 +1,7 @@
 # Usuarios y permisos por empresa
 
-Base de la autenticación. **Todavía no está conectada a las rutas HTTP**: la API sigue usando
-`API_BEARER_TOKEN` hasta el siguiente paso (inicio de sesión y verificación de permisos en cada ruta).
+Cada solicitud a la API lleva la sesión del usuario y cada ruta de empresa comprueba su rol en esa
+empresa (`src/api/http/access.ts`). Rutas de sesión y miembros: [api-rest.md](api-rest.md).
 
 ## Modelo
 
@@ -50,3 +50,24 @@ const ok = await access.verifyCredentials(email, password);    // usuario o null
 ```
 
 Contraseñas: mínimo 10 caracteres, hash scrypt con sal (`node:crypto`), comparación en tiempo constante.
+
+## Permiso por ruta
+
+| Rutas | Permiso |
+| --- | --- |
+| `GET` empresa · `PATCH` empresa | `company:read` · `company:update` |
+| `GET` / `POST` series | `series:read` · `series:create` |
+| `GET` comprobantes · `POST` comprobante | `cpe:read` · `cpe:emit` (+ `cpe:send_sunat` si se envía) |
+| `GET` compras y resumen · `POST` compra, `PATCH` estado SIRE | `purchases:read` · `purchases:write` |
+| `GET` asientos, período, balance, Mayor · `POST` asiento y contabilizar | `accounting:read` · `accounting:write` |
+| Cerrar · reabrir período | `accounting:close_period` · `accounting:reopen_period` |
+| Vista previa · confirmación del cierre anual | `accounting:read` · `accounting:annual_close` |
+| Miembros | `members:read` · `members:manage` |
+
+## Primeros usuarios
+
+- Desarrollo: `API_ALLOW_SIGNUP=true` y `POST /api/auth/register`.
+- Producción: `npm run user:create -- --email titular@empresa.pe --name "Nombre"` (pide la contraseña
+  por la terminal o la lee de `NEW_USER_PASSWORD`).
+- Empresas creadas antes de este cambio no tienen titular y nadie las ve. Asígnales uno con
+  `npm run user:create -- --email ... --name ... --owner-of <companyId>` (solo funciona si la empresa no tiene titular).

@@ -10,7 +10,8 @@
     "build": "tsc",
     "api:dev": "node --env-file=.env --import tsx src/api/main.ts",
     "api:start": "node --env-file=.env dist/api/main.js",
-    "test:db": "vitest run src/database src/api src/modules/auth"
+    "test:db": "vitest run src/database src/api src/modules/auth",
+    "user:create": "node --env-file=.env --import tsx src/api/cli/create-user.ts"
   },
   "keywords": [],
   "author": "",

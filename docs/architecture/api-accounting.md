@@ -25,7 +25,7 @@ flowchart LR
 - `POST /api/accounting/annual-close/preview`: recibe empresa y ejercicio; devuelve asientos, validaciones y `revision`.
 - `POST /api/accounting/annual-close/confirm`: recibe `expectedRevision`; devuelve `409` si el libro cambió desde el preview o el ejercicio ya fue cerrado.
 
-La API limita JSON a 32 KiB, no almacena respuestas en caché y escucha en `127.0.0.1` por defecto. Para escuchar fuera de loopback exige `API_BEARER_TOKEN`; ese token sirve para llamadas entre servidores y no debe incluirse en el navegador. Antes de exponerla a usuarios faltan autenticación y autorización por empresa.
+La API limita JSON a 32 KiB, no almacena respuestas en caché y escucha en `127.0.0.1` por defecto. Toda ruta exige sesión de usuario y cada ruta de empresa verifica el rol del usuario en esa empresa (ver `docs/usuarios-y-permisos.md`). Fuera de localhost debe publicarse detrás de HTTPS.
 
 ## Desarrollo
 

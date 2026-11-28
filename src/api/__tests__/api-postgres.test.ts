@@ -21,6 +21,7 @@ describe.skipIf(!adminUrl)("API REST persistente sobre PostgreSQL real", () => {
   });
   beforeEach(async () => {
     await truncateAll(db.pool);
+    await api.resetDefaultUser();
     const created = await api.request("POST", "/api/companies", companyBody());
     expect(created.status).toBe(201);
     companyId = created.json.id;

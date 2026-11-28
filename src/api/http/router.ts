@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ApiError } from "./http-utils.js";
+import type { PublicUser } from "../../modules/auth/types.js";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
@@ -8,15 +8,30 @@ export interface RouteContext {
   response: ServerResponse;
   params: Record<string, string>;
   query: URLSearchParams;
+  /** Usuario autenticado. Siempre presente salvo en rutas públicas. */
+  user?: PublicUser;
+  /** Hash del token de la sesión actual (para cerrar sesión). */
+  sessionTokenHash?: string;
 }
 
 export type RouteHandler = (context: RouteContext) => Promise<void>;
+
+export interface RouteOptions {
+  /** Ruta accesible sin sesión (inicio de sesión, registro). Por defecto toda ruta exige sesión. */
+  public?: boolean;
+}
 
 interface Route {
   method: HttpMethod;
   segments: string[];
   handler: RouteHandler;
+  public: boolean;
 }
+
+export type RouteMatch =
+  | { kind: "found"; handler: RouteHandler; params: Record<string, string>; public: boolean }
+  | { kind: "method_not_allowed" }
+  | { kind: "not_found" };
 
 const PARAM_VALUE = /^[A-Za-z0-9._-]{1,128}$/;
 
@@ -24,23 +39,21 @@ const PARAM_VALUE = /^[A-Za-z0-9._-]{1,128}$/;
 export class Router {
   private readonly routes: Route[] = [];
 
-  on(method: HttpMethod, pattern: string, handler: RouteHandler): this {
-    this.routes.push({ method, segments: pattern.split("/").filter(Boolean), handler });
+  on(method: HttpMethod, pattern: string, handler: RouteHandler, options: RouteOptions = {}): this {
+    this.routes.push({ method, segments: pattern.split("/").filter(Boolean), handler, public: options.public === true });
     return this;
   }
 
-  /** Devuelve el handler y sus parámetros, o null si ninguna ruta coincide con la ruta. */
-  match(method: string, pathname: string): { handler: RouteHandler; params: Record<string, string> } | null {
+  match(method: string, pathname: string): RouteMatch {
     const parts = pathname.split("/").filter(Boolean);
     let pathMatched = false;
     for (const route of this.routes) {
       const params = matchSegments(route.segments, parts);
       if (!params) continue;
       pathMatched = true;
-      if (route.method === method) return { handler: route.handler, params };
+      if (route.method === method) return { kind: "found", handler: route.handler, params, public: route.public };
     }
-    if (pathMatched) throw new ApiError(405, "METHOD_NOT_ALLOWED", "Método no permitido para esta ruta.");
-    return null;
+    return pathMatched ? { kind: "method_not_allowed" } : { kind: "not_found" };
   }
 }
 

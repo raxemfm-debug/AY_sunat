@@ -1,4 +1,5 @@
 import { AccessControlService } from "../modules/auth/access-control.service.js";
+import { DEFAULT_SESSION_TTL_MS, LoginThrottle, LoginThrottleOptions, SessionService } from "../modules/auth/session.service.js";
 import type { Persistence } from "../database/persistence.js";
 import type { ICompanyRepository } from "../database/repositories/company.repository.js";
 import type { ICpeRepository } from "../database/repositories/cpe.repository.js";
@@ -17,6 +18,15 @@ export interface EmissionSettings {
   requireCertificate: boolean;
 }
 
+export interface AuthSettings {
+  /** Alta libre de usuarios por POST /api/auth/register. Apagada por defecto. */
+  allowSignup: boolean;
+  sessionTtlMs: number;
+  /** Reloj inyectable (pruebas de vencimiento de sesión). */
+  now?: () => Date;
+  throttle?: LoginThrottleOptions;
+}
+
 export interface ApiServices {
   companies: ICompanyRepository;
   cpe: ICpeRepository;
@@ -24,11 +34,25 @@ export interface ApiServices {
   purchases: PersistentPurchaseService;
   accounting: PersistentAccountingService;
   emissionSettings: EmissionSettings;
-  /** Usuarios y permisos por empresa (aún no conectado a las rutas). */
+  /** Usuarios y permisos por empresa: toda ruta de empresa pasa por aquí. */
   access: AccessControlService;
+  sessions: SessionService;
+  loginThrottle: LoginThrottle;
+  authSettings: AuthSettings;
 }
 
-export function createApiServices(persistence: Persistence, settings: Partial<EmissionSettings> = {}): ApiServices {
+export function createApiServices(
+  persistence: Persistence,
+  settings: Partial<EmissionSettings> = {},
+  auth: Partial<AuthSettings> = {},
+): ApiServices {
+  const authSettings: AuthSettings = {
+    allowSignup: auth.allowSignup ?? false,
+    sessionTtlMs: auth.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS,
+    now: auth.now,
+    throttle: auth.throttle,
+  };
+  const access = new AccessControlService(persistence.users);
   const emissionSettings: EmissionSettings = {
     sunatSendEnabled: settings.sunatSendEnabled ?? false,
     sunatEnvironment: settings.sunatEnvironment ?? "beta",
@@ -46,7 +70,10 @@ export function createApiServices(persistence: Persistence, settings: Partial<Em
     }),
     purchases: new PersistentPurchaseService(persistence.purchases),
     accounting: new PersistentAccountingService(persistence.ledger),
-    access: new AccessControlService(persistence.users),
+    access,
+    sessions: new SessionService(persistence.sessions, access, { ttlMs: authSettings.sessionTtlMs, now: authSettings.now }),
+    loginThrottle: new LoginThrottle(authSettings.throttle),
+    authSettings,
     emissionSettings,
   };
 }

@@ -42,7 +42,10 @@ const backends: Backend[] = [
       const api = await startApi({ services: createApiServices(createPersistence({ pool: db.pool })) });
       return {
         api,
-        reset: () => truncateAll(db.pool),
+        async reset() {
+          await truncateAll(db.pool);
+          await api.resetDefaultUser();
+        },
         async teardown() {
           await api.close();
           await db.drop();

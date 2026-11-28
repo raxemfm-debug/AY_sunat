@@ -12,6 +12,8 @@ import {
   sendJson,
 } from "../http/http-utils.js";
 import type { Router } from "../http/router.js";
+import { currentUser, requireCompanyAccess } from "../http/access.js";
+import { ROLE_LABELS } from "../../modules/auth/permissions.js";
 
 const TAX_REGIMES = ["RMT", "RER", "RG", "NRUS"] as const satisfies readonly TaxRegimeCode[];
 const SERIES_CPE_TYPES = ["01", "03", "07", "08", "09"] as const;
@@ -44,14 +46,24 @@ function addressFields(body: JsonObject, required: boolean) {
 }
 
 export function registerCompanyRoutes(router: Router, services: ApiServices): void {
-  router.on("GET", "/api/companies", async ({ response, query }) => {
+  /** Solo las empresas de las que el usuario es miembro, con su rol en cada una. */
+  router.on("GET", "/api/companies", async ({ response, query, user }) => {
     const active = query.get("active");
-    const filter = active === null ? undefined : { isActive: active === "true" };
-    const companies = await services.companies.listAll(filter);
-    sendJson(response, 200, { data: companies.map(toPublicCompany) });
+    const access = await services.access.listAccessibleCompanies(currentUser(user).id);
+    const data = [];
+    for (const item of access) {
+      const company = await services.companies.findById(item.companyId);
+      if (!company) continue;
+      if (active !== null && company.isActive !== (active === "true")) continue;
+      data.push({ ...toPublicCompany(company), role: item.role, roleLabel: ROLE_LABELS[item.role] });
+    }
+    data.sort((a, b) => a.legalName.localeCompare(b.legalName));
+    sendJson(response, 200, { data });
   });
 
-  router.on("POST", "/api/companies", async ({ request, response }) => {
+  /** Cualquier usuario autenticado puede registrar una empresa; queda como su titular. */
+  router.on("POST", "/api/companies", async ({ request, response, user }) => {
+    const actor = currentUser(user);
     const body = await readJson(request);
     const ruc = requiredString(body, "ruc", 11);
     if (!/^\d{11}$/.test(ruc)) throw new ApiError(400, "INVALID_INPUT", "ruc debe tener 11 dígitos.");
@@ -64,15 +76,17 @@ export function registerCompanyRoutes(router: Router, services: ApiServices): vo
       certAlias: optionalString(body, "certAlias", 100),
       ...address,
     });
-    sendJson(response, 201, toPublicCompany(company));
+    await services.access.assignInitialOwner(company.id, actor.id);
+    sendJson(response, 201, { ...toPublicCompany(company), role: "OWNER", roleLabel: ROLE_LABELS.OWNER });
   });
 
-  router.on("GET", "/api/companies/:companyId", async ({ response, params }) => {
-    sendJson(response, 200, toPublicCompany(await requireCompany(services, params.companyId)));
+  router.on("GET", "/api/companies/:companyId", async ({ response, params, user }) => {
+    const { company, role } = await requireCompanyAccess(services, user, params.companyId, "company:read");
+    sendJson(response, 200, { ...toPublicCompany(company), role, roleLabel: ROLE_LABELS[role] });
   });
 
-  router.on("PATCH", "/api/companies/:companyId", async ({ request, response, params }) => {
-    await requireCompany(services, params.companyId);
+  router.on("PATCH", "/api/companies/:companyId", async ({ request, response, params, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "company:update");
     const body = await readJson(request);
     const updates: UpdateCompanyDto = {
       legalName: optionalString(body, "legalName", 300),
@@ -88,14 +102,14 @@ export function registerCompanyRoutes(router: Router, services: ApiServices): vo
     sendJson(response, 200, toPublicCompany(company));
   });
 
-  router.on("GET", "/api/companies/:companyId/series", async ({ response, params }) => {
-    await requireCompany(services, params.companyId);
+  router.on("GET", "/api/companies/:companyId/series", async ({ response, params, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "series:read");
     const series: DocumentSeriesEntity[] = await services.companies.listSeriesByCompany(params.companyId);
     sendJson(response, 200, { data: series });
   });
 
-  router.on("POST", "/api/companies/:companyId/series", async ({ request, response, params }) => {
-    await requireCompany(services, params.companyId);
+  router.on("POST", "/api/companies/:companyId/series", async ({ request, response, params, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "series:create");
     const body = await readJson(request);
     const series = requiredString(body, "series", 4).toUpperCase();
     if (!/^[A-Z0-9]{4}$/.test(series)) throw new ApiError(400, "INVALID_INPUT", "series debe tener 4 caracteres alfanuméricos.");

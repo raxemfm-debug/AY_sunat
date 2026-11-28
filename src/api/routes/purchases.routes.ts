@@ -22,7 +22,7 @@ import {
   sendJson,
 } from "../http/http-utils.js";
 import type { Router } from "../http/router.js";
-import { requireCompany } from "./companies.routes.js";
+import { requireCompanyAccess } from "../http/access.js";
 
 const IDENTITY_DOC_TYPES = ["0", "1", "4", "6", "7"] as const satisfies readonly IdentityDocTypeCode[];
 const PURCHASE_DOC_TYPES = ["01", "03", "07", "08", "50"] as const;
@@ -93,35 +93,35 @@ export function parsePurchase(companyRuc: string, body: JsonObject): PurchaseDoc
 }
 
 export function registerPurchaseRoutes(router: Router, services: ApiServices): void {
-  router.on("POST", "/api/companies/:companyId/purchases", async ({ request, response, params }) => {
-    const company = await requireCompany(services, params.companyId);
+  router.on("POST", "/api/companies/:companyId/purchases", async ({ request, response, params, user }) => {
+    const { company } = await requireCompanyAccess(services, user, params.companyId, "purchases:write");
     const body = await readJson(request, LARGE_MAX_BODY_BYTES);
     const record = await services.purchases.registerPurchase(parsePurchase(company.ruc, body));
     sendJson(response, 201, record);
   });
 
-  router.on("GET", "/api/companies/:companyId/purchases", async ({ response, params, query }) => {
-    const company = await requireCompany(services, params.companyId);
+  router.on("GET", "/api/companies/:companyId/purchases", async ({ response, params, query, user }) => {
+    const { company } = await requireCompanyAccess(services, user, params.companyId, "purchases:read");
     const period = requirePeriod(query.get("period"));
     sendJson(response, 200, { data: await services.purchases.listByPeriod(company.ruc, period), period });
   });
 
   // Registrada antes de /:car para que "summary" no se lea como un CAR.
-  router.on("GET", "/api/companies/:companyId/purchases/summary", async ({ response, params, query }) => {
-    const company = await requireCompany(services, params.companyId);
+  router.on("GET", "/api/companies/:companyId/purchases/summary", async ({ response, params, query, user }) => {
+    const { company } = await requireCompanyAccess(services, user, params.companyId, "purchases:read");
     const period = requirePeriod(query.get("period"));
     sendJson(response, 200, await services.purchases.getMonthlySummary(company.ruc, period));
   });
 
-  router.on("GET", "/api/companies/:companyId/purchases/:car", async ({ response, params }) => {
-    const company = await requireCompany(services, params.companyId);
+  router.on("GET", "/api/companies/:companyId/purchases/:car", async ({ response, params, user }) => {
+    const { company } = await requireCompanyAccess(services, user, params.companyId, "purchases:read");
     const record = await services.purchases.findByCar(company.ruc, params.car);
     if (!record) throw new ApiError(404, "PURCHASE_NOT_FOUND", "Comprobante de compra no encontrado.");
     sendJson(response, 200, record);
   });
 
-  router.on("PATCH", "/api/companies/:companyId/purchases/:car/sire-status", async ({ request, response, params }) => {
-    const company = await requireCompany(services, params.companyId);
+  router.on("PATCH", "/api/companies/:companyId/purchases/:car/sire-status", async ({ request, response, params, user }) => {
+    const { company } = await requireCompanyAccess(services, user, params.companyId, "purchases:write");
     const body = await readJson(request);
     const status = requiredEnum(body, "status", SIRE_STATUSES);
     sendJson(response, 200, await services.purchases.updateSireStatus(company.ruc, params.car, status));

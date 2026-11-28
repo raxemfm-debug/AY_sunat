@@ -57,7 +57,7 @@ export async function createTestDatabase(adminUrl: string): Promise<TestDatabase
 /** Vacía todas las tablas de datos entre pruebas. */
 export async function truncateAll(pool: pg.Pool): Promise<void> {
   await pool.query(`TRUNCATE
-    private.company_membership_events, private.company_memberships, private.app_users,
+    private.user_sessions, private.company_membership_events, private.company_memberships, private.app_users,
     private.purchase_items, private.purchase_documents, private.purchase_suppliers,
     private.accounting_annual_closes, private.accounting_journal_entry_lines,
     private.accounting_journal_entries, private.accounting_periods, private.accounting_fiscal_years,

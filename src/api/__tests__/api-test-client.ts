@@ -2,35 +2,84 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { createApiServer, ApiServerOptions } from "../http-server.js";
 
+export const TEST_PASSWORD = "clave-segura-de-prueba";
+
+export interface TestUser {
+  id: string;
+  email: string;
+  token: string;
+}
+
+export interface ApiResponse {
+  status: number;
+  json: any;
+  headers: Headers;
+}
+
+type RequestFn = (method: string, path: string, body?: unknown, headers?: Record<string, string>) => Promise<ApiResponse>;
+
 export interface ApiTestClient {
   baseUrl: string;
-  request(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; json: any }>;
+  services: ApiServerOptions["services"];
+  /** Usuario por defecto: titular de las empresas que crean las pruebas. */
+  user: TestUser;
+  /** Solicitud con la sesión del usuario por defecto. Pasa `authorization: ""` para ir sin sesión. */
+  request: RequestFn;
+  /** Solicitudes con la sesión de otro usuario, o sin sesión (null). */
+  as(user: TestUser | null): { request: RequestFn };
+  /** Crea un usuario con sesión abierta (sin pasar por el freno de inicio de sesión). */
+  createUser(email: string, fullName?: string): Promise<TestUser>;
+  /** Vuelve a crear el usuario por defecto (tras vaciar la base de datos). */
+  resetDefaultUser(): Promise<void>;
   close(): Promise<void>;
 }
 
-/** Levanta el servidor real en un puerto efímero de loopback. */
-export async function startApi(options: Omit<ApiServerOptions, "host">, token?: string): Promise<ApiTestClient> {
-  const server: Server = createApiServer({ ...options, host: "127.0.0.1", bearerToken: token });
+/** Levanta el servidor real en un puerto efímero de loopback, con un usuario ya autenticado. */
+export async function startApi(options: Omit<ApiServerOptions, "host">): Promise<ApiTestClient> {
+  const server: Server = createApiServer({ ...options, host: "127.0.0.1" });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   const baseUrl = `http://127.0.0.1:${port}`;
-  return {
-    baseUrl,
-    async request(method, path, body, headers = {}) {
+  const { services } = options;
+
+  async function createUser(email: string, fullName = "Usuario de Prueba"): Promise<TestUser> {
+    const user = await services.access.registerUser({ email, fullName, password: TEST_PASSWORD });
+    const session = await services.sessions.issue(user);
+    return { id: user.id, email: user.email, token: session.token };
+  }
+
+  function requester(getUser: () => TestUser | null): RequestFn {
+    return async (method, path, body, headers = {}) => {
+      const current = getUser();
+      const merged: Record<string, string> = {
+        ...(body !== undefined ? { "content-type": "application/json" } : {}),
+        ...(current ? { authorization: `Bearer ${current.token}` } : {}),
+        ...headers,
+      };
+      if (merged.authorization === "") delete merged.authorization;
       const response = await fetch(`${baseUrl}${path}`, {
         method,
-        headers: {
-          ...(body !== undefined ? { "content-type": "application/json" } : {}),
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-          ...headers,
-        },
+        headers: merged,
         body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
       });
       const text = await response.text();
-      return { status: response.status, json: text ? JSON.parse(text) : undefined };
+      return { status: response.status, json: text ? JSON.parse(text) : undefined, headers: response.headers };
+    };
+  }
+
+  const client: ApiTestClient = {
+    baseUrl,
+    services,
+    user: await createUser("titular@aysunat.test", "Titular de Prueba"),
+    request: requester(() => client.user),
+    as: (user) => ({ request: requester(() => user) }),
+    createUser,
+    async resetDefaultUser() {
+      client.user = await createUser("titular@aysunat.test", "Titular de Prueba");
     },
     close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
   };
+  return client;
 }
 
 export const companyBody = (over: Record<string, unknown> = {}) => ({

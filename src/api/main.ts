@@ -25,12 +25,27 @@ function loadServerCertificate(): CertificateData | undefined {
 }
 
 const sunatEnvironment = process.env.SUNAT_ENVIRONMENT === "production" ? "production" : "beta";
-const services = createApiServices(persistence, {
-  sunatSendEnabled: process.env.SUNAT_SEND_ENABLED === "true",
-  sunatEnvironment,
-  certificate: loadServerCertificate(),
-  requireCertificate: production,
-});
+const sessionHours = Number(process.env.API_SESSION_TTL_HOURS ?? "12");
+if (!Number.isFinite(sessionHours) || sessionHours <= 0 || sessionHours > 24 * 30) {
+  throw new Error("API_SESSION_TTL_HOURS debe ser un número de horas entre 0 y 720.");
+}
+if (process.env.API_BEARER_TOKEN) {
+  process.stderr.write("[api] API_BEARER_TOKEN ya no se usa: la API exige inicio de sesión por usuario. Quítalo de .env.\n");
+}
+
+const services = createApiServices(
+  persistence,
+  {
+    sunatSendEnabled: process.env.SUNAT_SEND_ENABLED === "true",
+    sunatEnvironment,
+    certificate: loadServerCertificate(),
+    requireCertificate: production,
+  },
+  {
+    allowSignup: process.env.API_ALLOW_SIGNUP === "true",
+    sessionTtlMs: sessionHours * 60 * 60 * 1000,
+  },
+);
 
 const annualCloseRepository = persistence.pool
   ? new PostgresAnnualCloseRepository(persistence.pool)
@@ -39,13 +54,19 @@ const server = createApiServer({
   application: new AnnualCloseApplication(annualCloseRepository),
   services,
   host,
-  bearerToken: process.env.API_BEARER_TOKEN,
 });
+
+// Limpieza periódica de sesiones vencidas o revocadas.
+const purgeTimer = setInterval(() => {
+  services.sessions.purgeExpired().catch((error) => console.error("[api] limpieza de sesiones", error));
+}, 60 * 60 * 1000);
+purgeTimer.unref();
 
 server.listen(port, host, () => {
   const storage = persistence.kind === "postgres" ? "PostgreSQL" : "memoria (solo desarrollo)";
   const sunat = services.emissionSettings.sunatSendEnabled ? `envío SUNAT ${sunatEnvironment}` : "envío SUNAT desactivado";
-  process.stdout.write(`API local disponible en http://${host}:${port} · ${storage} · ${sunat}\n`);
+  const signup = services.authSettings.allowSignup ? "registro libre activado" : "registro libre desactivado";
+  process.stdout.write(`API local disponible en http://${host}:${port} · ${storage} · ${sunat} · ${signup}\n`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

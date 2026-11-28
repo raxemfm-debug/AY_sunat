@@ -83,11 +83,30 @@ export class AccessControlService {
     return this.users.findById(userId);
   }
 
+  /** Busca un usuario por correo (para invitarlo a una empresa). Nunca devuelve el hash. */
+  async findUserByEmail(email: unknown): Promise<PublicUser | null> {
+    let normalized: string;
+    try {
+      normalized = normalizeEmail(email);
+    } catch {
+      return null;
+    }
+    const user = await this.users.findCredentialsByEmail(normalized);
+    if (!user) return null;
+    const { passwordHash: _hash, ...publicUser } = user;
+    return publicUser;
+  }
+
   /** Rol efectivo del usuario en la empresa; null si no es miembro o su cuenta está inactiva. */
   async getRole(userId: string, companyId: string): Promise<CompanyRole | null> {
     const [user, membership] = await Promise.all([this.users.findById(userId), this.users.getMembership(companyId, userId)]);
     if (!user?.isActive || !membership) return null;
     return membership.role;
+  }
+
+  /** Si existe la membresía, aunque la cuenta esté desactivada. */
+  async isMember(companyId: string, userId: string): Promise<boolean> {
+    return (await this.users.getMembership(companyId, userId)) !== null;
   }
 
   async can(userId: string, companyId: string, permission: Permission): Promise<boolean> {
