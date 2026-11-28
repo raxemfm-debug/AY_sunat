@@ -16,7 +16,8 @@ npm run api:dev          # http://127.0.0.1:3000
   En producción no se firma sin certificado propio.
 - El envío a SUNAT está apagado por defecto (`SUNAT_SEND_ENABLED=false`).
 - Los errores internos responden `500 INTERNAL_ERROR` sin detalles; el detalle queda en el log del servidor.
-- Un solo token da acceso a todas las empresas: todavía no hay usuarios ni permisos por empresa.
+- Un solo token da acceso a todas las empresas. El modelo de usuarios y permisos por empresa ya existe
+  ([usuarios-y-permisos.md](usuarios-y-permisos.md)), pero aún no está conectado a las rutas.
 
 ## Errores
 

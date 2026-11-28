@@ -1,3 +1,4 @@
+import { AccessControlService } from "../modules/auth/access-control.service.js";
 import type { Persistence } from "../database/persistence.js";
 import type { ICompanyRepository } from "../database/repositories/company.repository.js";
 import type { ICpeRepository } from "../database/repositories/cpe.repository.js";
@@ -23,6 +24,8 @@ export interface ApiServices {
   purchases: PersistentPurchaseService;
   accounting: PersistentAccountingService;
   emissionSettings: EmissionSettings;
+  /** Usuarios y permisos por empresa (aún no conectado a las rutas). */
+  access: AccessControlService;
 }
 
 export function createApiServices(persistence: Persistence, settings: Partial<EmissionSettings> = {}): ApiServices {
@@ -43,6 +46,7 @@ export function createApiServices(persistence: Persistence, settings: Partial<Em
     }),
     purchases: new PersistentPurchaseService(persistence.purchases),
     accounting: new PersistentAccountingService(persistence.ledger),
+    access: new AccessControlService(persistence.users),
     emissionSettings,
   };
 }

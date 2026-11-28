@@ -11,6 +11,8 @@ import { PostgresCompanyRepository } from './postgres/postgres-company.repositor
 import { PostgresCpeRepository } from './postgres/postgres-cpe.repository.js';
 import { PostgresPurchaseRepository } from './postgres/postgres-purchase.repository.js';
 import { PostgresAccountingLedgerRepository } from './postgres/postgres-accounting-ledger.repository.js';
+import { IUserRepository, MemoryUserRepository } from './repositories/user.repository.js';
+import { PostgresUserRepository } from './postgres/postgres-user.repository.js';
 
 export interface Persistence {
   kind: 'postgres' | 'memory';
@@ -19,6 +21,7 @@ export interface Persistence {
   cpe: ICpeRepository;
   purchases: IPurchaseRepository;
   ledger: IAccountingLedgerRepository;
+  users: IUserRepository;
   close(): Promise<void>;
 }
 
@@ -46,12 +49,14 @@ export function createPersistence(options: PersistenceOptions = {}): Persistence
   if (!allowMemory) {
     throw new Error('DATABASE_URL es obligatoria en producción; no se permite iniciar con almacenamiento en memoria.');
   }
+  const companies = new CompanyRepository();
   return {
     kind: 'memory',
-    companies: new CompanyRepository(),
+    companies,
     cpe: new CpeRepository(),
     purchases: new MemoryPurchaseRepository(),
     ledger: new MemoryAccountingLedgerRepository(),
+    users: new MemoryUserRepository(async (id) => (await companies.findById(id)) !== null),
     close: async () => undefined,
   };
 }
@@ -64,6 +69,7 @@ function postgresPersistence(pool: Pool, close: () => Promise<void>): Persistenc
     cpe: new PostgresCpeRepository(pool),
     purchases: new PostgresPurchaseRepository(pool),
     ledger: new PostgresAccountingLedgerRepository(pool),
+    users: new PostgresUserRepository(pool),
     close,
   };
 }
