@@ -9,9 +9,9 @@ describe("API REST persistente (almacenamiento en memoria)", () => {
   let companyId: string;
   const logged: unknown[] = [];
 
-  async function boot(settings: Partial<EmissionSettings> = {}, token?: string) {
+  async function boot(settings: Partial<EmissionSettings> = {}) {
     services = createApiServices(createPersistence({ allowMemory: true }), settings);
-    api = await startApi({ services, logError: (error) => logged.push(error) }, token);
+    api = await startApi({ services, logError: (error) => logged.push(error) });
     const created = await api.request("POST", "/api/companies", companyBody());
     companyId = created.json?.id;
   }
@@ -23,13 +23,12 @@ describe("API REST persistente (almacenamiento en memoria)", () => {
   afterEach(async () => api.close());
 
   describe("seguridad y protocolo", () => {
-    it("exige el token Bearer cuando está configurado, salvo en /health", async () => {
-      await api.close();
-      await boot({}, "token-de-prueba-123");
+    it("exige una sesión de usuario, salvo en /health", async () => {
       const health = await fetch(`${api.baseUrl}/health`);
       expect(health.status).toBe(200);
       const anonymous = await fetch(`${api.baseUrl}/api/companies`);
       expect(anonymous.status).toBe(401);
+      expect(anonymous.headers.get("www-authenticate")).toContain("Bearer");
       const wrong = await api.request("GET", "/api/companies", undefined, { authorization: "Bearer otro-token-xyz" });
       expect(wrong.status).toBe(401);
       expect((await api.request("GET", "/api/companies")).status).toBe(200);
@@ -43,7 +42,7 @@ describe("API REST persistente (almacenamiento en memoria)", () => {
     });
 
     it("oculta los errores internos y los registra sin exponerlos", async () => {
-      services.companies.listAll = async () => {
+      services.companies.findById = async () => {
         throw new TypeError("detalle interno secreto");
       };
       const response = await api.request("GET", "/api/companies");

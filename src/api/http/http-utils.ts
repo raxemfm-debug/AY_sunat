@@ -3,6 +3,15 @@ import { AnnualCloseApplicationError } from "../accounting/annual-close.applicat
 import { DuplicatePurchaseError } from "../../database/repositories/purchase.repository.js";
 import { ConcurrentPeriodChangeError } from "../../database/repositories/accounting-ledger.repository.js";
 import { CpeValidationError } from "../../modules/printing/cpe-validator.js";
+import { MembershipRuleError } from "../../modules/auth/permissions.js";
+import { AccessDeniedError, DuplicateUserError, UserNotFoundError } from "../../modules/auth/types.js";
+
+const MEMBERSHIP_STATUS: Record<MembershipRuleError["code"], number> = {
+  FORBIDDEN: 403,
+  LAST_OWNER: 409,
+  NOT_A_MEMBER: 404,
+  NO_CHANGE: 409,
+};
 
 export const DEFAULT_MAX_BODY_BYTES = 32 * 1024;
 export const LARGE_MAX_BODY_BYTES = 512 * 1024;
@@ -21,8 +30,9 @@ export class ApiError extends Error {
 
 export type JsonObject = Record<string, unknown>;
 
-export function sendJson(response: ServerResponse, status: number, payload: unknown): void {
+export function sendJson(response: ServerResponse, status: number, payload: unknown, headers: Record<string, string> = {}): void {
   response.writeHead(status, {
+    ...headers,
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
@@ -184,6 +194,10 @@ export function toApiError(error: unknown): ApiError | undefined {
   if (error instanceof DuplicatePurchaseError) return new ApiError(409, "DUPLICATE_PURCHASE", error.message);
   if (error instanceof ConcurrentPeriodChangeError) return new ApiError(409, "CONCURRENT_CHANGE", error.message);
   if (error instanceof CpeValidationError) return new ApiError(422, "CPE_VALIDATION_FAILED", error.message);
+  if (error instanceof AccessDeniedError) return new ApiError(403, "FORBIDDEN", error.message);
+  if (error instanceof MembershipRuleError) return new ApiError(MEMBERSHIP_STATUS[error.code], error.code, error.message);
+  if (error instanceof DuplicateUserError) return new ApiError(409, "EMAIL_TAKEN", "Ya existe una cuenta con ese correo.");
+  if (error instanceof UserNotFoundError) return new ApiError(404, "USER_NOT_FOUND", "Usuario no encontrado.");
   if (isDatabaseError(error)) {
     if (error.code === "23505") return new ApiError(409, "CONFLICT", "El registro ya existe.");
     return undefined;

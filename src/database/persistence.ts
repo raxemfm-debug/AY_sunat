@@ -13,6 +13,8 @@ import { PostgresPurchaseRepository } from './postgres/postgres-purchase.reposit
 import { PostgresAccountingLedgerRepository } from './postgres/postgres-accounting-ledger.repository.js';
 import { IUserRepository, MemoryUserRepository } from './repositories/user.repository.js';
 import { PostgresUserRepository } from './postgres/postgres-user.repository.js';
+import { ISessionRepository, MemorySessionRepository } from './repositories/session.repository.js';
+import { PostgresSessionRepository } from './postgres/postgres-session.repository.js';
 
 export interface Persistence {
   kind: 'postgres' | 'memory';
@@ -22,6 +24,7 @@ export interface Persistence {
   purchases: IPurchaseRepository;
   ledger: IAccountingLedgerRepository;
   users: IUserRepository;
+  sessions: ISessionRepository;
   close(): Promise<void>;
 }
 
@@ -57,6 +60,7 @@ export function createPersistence(options: PersistenceOptions = {}): Persistence
     purchases: new MemoryPurchaseRepository(),
     ledger: new MemoryAccountingLedgerRepository(),
     users: new MemoryUserRepository(async (id) => (await companies.findById(id)) !== null),
+    sessions: new MemorySessionRepository(),
     close: async () => undefined,
   };
 }
@@ -70,6 +74,7 @@ function postgresPersistence(pool: Pool, close: () => Promise<void>): Persistenc
     purchases: new PostgresPurchaseRepository(pool),
     ledger: new PostgresAccountingLedgerRepository(pool),
     users: new PostgresUserRepository(pool),
+    sessions: new PostgresSessionRepository(pool),
     close,
   };
 }

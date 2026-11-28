@@ -23,7 +23,8 @@ import {
   sendJson,
 } from "../http/http-utils.js";
 import type { Router } from "../http/router.js";
-import { requireCompany } from "./companies.routes.js";
+import { requireCompanyAccess } from "../http/access.js";
+import { roleHasPermission } from "../../modules/auth/permissions.js";
 
 const CPE_TYPES = ["01", "03", "07"] as const;
 const IDENTITY_DOC_TYPES = ["0", "1", "4", "6", "7"] as const satisfies readonly IdentityDocTypeCode[];
@@ -139,8 +140,8 @@ function toEmitResponse(result: EmitCpeResult, files: Set<FileKind>) {
 }
 
 export function registerCpeRoutes(router: Router, services: ApiServices): void {
-  router.on("POST", "/api/companies/:companyId/cpe", async ({ request, response, params }) => {
-    const company = await requireCompany(services, params.companyId);
+  router.on("POST", "/api/companies/:companyId/cpe", async ({ request, response, params, user }) => {
+    const { company, role } = await requireCompanyAccess(services, user, params.companyId, "cpe:emit");
     const body = await readJson(request, LARGE_MAX_BODY_BYTES);
     const emitRequest = parseEmitRequest(company.id, body);
     const options = optionalObject(body, "options");
@@ -152,6 +153,9 @@ export function registerCpeRoutes(router: Router, services: ApiServices): void {
       throw new ApiError(409, "SUNAT_SEND_DISABLED", "El envío a SUNAT está desactivado en este servidor (SUNAT_SEND_ENABLED).");
     }
     const sendToSunat = settings.sunatSendEnabled && requestedSend !== false;
+    if (sendToSunat && !roleHasPermission(role, "cpe:send_sunat")) {
+      throw new ApiError(403, "FORBIDDEN", "Tu rol en esta empresa no permite enviar comprobantes a SUNAT.");
+    }
     if ((settings.requireCertificate || sendToSunat) && !settings.certificate) {
       throw new ApiError(503, "CERTIFICATE_NOT_CONFIGURED", "Configura el certificado digital del servidor antes de emitir.");
     }
@@ -169,8 +173,8 @@ export function registerCpeRoutes(router: Router, services: ApiServices): void {
     sendJson(response, 201, toEmitResponse(result, files));
   });
 
-  router.on("GET", "/api/companies/:companyId/cpe", async ({ response, params, query }) => {
-    await requireCompany(services, params.companyId);
+  router.on("GET", "/api/companies/:companyId/cpe", async ({ response, params, query, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "cpe:read");
     const filter = Object.fromEntries(
       ["cpeType", "series", "startDate", "endDate", "clientDocNumber", "status"]
         .map((key) => [key, query.get(key) ?? undefined])
@@ -195,8 +199,8 @@ export function registerCpeRoutes(router: Router, services: ApiServices): void {
     sendJson(response, 200, { data: documents, limit, offset });
   });
 
-  router.on("GET", "/api/companies/:companyId/cpe/:cpeId", async ({ response, params }) => {
-    await requireCompany(services, params.companyId);
+  router.on("GET", "/api/companies/:companyId/cpe/:cpeId", async ({ response, params, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "cpe:read");
     const aggregate = await services.cpe.findById(params.cpeId);
     // Un comprobante de otra empresa se responde igual que uno inexistente.
     if (!aggregate || aggregate.document.companyId !== params.companyId) {

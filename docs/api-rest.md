@@ -9,15 +9,18 @@ npm run api:dev          # http://127.0.0.1:3000
 
 ## Seguridad
 
-- Todas las rutas, salvo `GET /health`, exigen `Authorization: Bearer <API_BEARER_TOKEN>` cuando el token está configurado.
-  Fuera de loopback (`API_HOST` distinto de 127.0.0.1) el token es obligatorio.
+- Todas las rutas, salvo `GET /health`, `POST /api/auth/login` y `POST /api/auth/register`, exigen una sesión de usuario:
+  `Authorization: Bearer <token>` (el token lo entrega el inicio de sesión). Sin sesión, cualquier ruta responde 401.
+- Cada ruta de empresa comprueba el rol del usuario **en esa empresa** (ver [usuarios-y-permisos.md](usuarios-y-permisos.md)).
+  Quien no es miembro recibe 404, como si la empresa no existiera; un miembro sin permiso recibe 403.
+- Quién cerró o reabrió un período se toma de la sesión, no del cuerpo de la solicitud.
+- Fuera de localhost, publica la API solo detrás de HTTPS: el token viaja en cada solicitud.
 - Las credenciales SOL nunca se aceptan ni se devuelven por la API (`hasSolCredentials` indica si existen).
 - El certificado digital se carga en el servidor (`SUNAT_CERT_PATH`); nunca viaja en una solicitud.
   En producción no se firma sin certificado propio.
 - El envío a SUNAT está apagado por defecto (`SUNAT_SEND_ENABLED=false`).
 - Los errores internos responden `500 INTERNAL_ERROR` sin detalles; el detalle queda en el log del servidor.
-- Un solo token da acceso a todas las empresas. El modelo de usuarios y permisos por empresa ya existe
-  ([usuarios-y-permisos.md](usuarios-y-permisos.md)), pero aún no está conectado a las rutas.
+- `API_BEARER_TOKEN` (token compartido) ya no se usa.
 
 ## Errores
 
@@ -28,15 +31,42 @@ npm run api:dev          # http://127.0.0.1:3000
 | Estado | Cuándo |
 | --- | --- |
 | 400 `INVALID_INPUT` | Estructura o formato inválido (campo faltante, código fuera de catálogo, período) |
-| 401 | Token ausente o incorrecto |
-| 404 | Empresa, comprobante, compra o asiento inexistente (o de otra empresa) |
-| 409 | Duplicado, período cerrado, cambio concurrente, envío SUNAT desactivado |
+| 401 `UNAUTHORIZED` / `INVALID_CREDENTIALS` | Sin sesión, sesión vencida o revocada, cuenta desactivada; correo o contraseña incorrectos |
+| 403 `FORBIDDEN` | Tu rol en la empresa no permite la acción |
+| 404 | Empresa, comprobante, compra o asiento inexistente, de otra empresa o de una empresa de la que no eres miembro |
+| 409 | Duplicado, período cerrado, cambio concurrente, envío SUNAT desactivado, último titular (`LAST_OWNER`) |
+| 429 `TOO_MANY_ATTEMPTS` | Demasiados inicios de sesión fallidos (cabecera `Retry-After`) |
 | 422 | Regla tributaria o contable incumplida (RUC inválido, asiento descuadrado) |
 | 503 `CERTIFICATE_NOT_CONFIGURED` | Falta el certificado del servidor |
 
 ## Rutas
 
+### Sesión
+
+| Método y ruta | Qué hace |
+| --- | --- |
+| `POST /api/auth/login` | `{ email, password }` → `{ token, tokenType, expiresAt, user }`. 5 fallos por correo (o 30 por IP) en 15 min bloquean nuevos intentos |
+| `POST /api/auth/logout` | Revoca la sesión actual |
+| `GET /api/auth/me` | Usuario y empresas a las que tiene acceso, con rol y permisos |
+| `POST /api/auth/password` | `{ currentPassword, newPassword }`; cierra las demás sesiones del usuario |
+| `POST /api/auth/register` | `{ email, fullName, password }`. Solo si `API_ALLOW_SIGNUP=true` |
+
+Las sesiones duran `API_SESSION_TTL_HOURS` (12 h por defecto). En la base solo se guarda el SHA-256 del token.
+
+### Miembros de una empresa
+
+| Método y ruta | Permiso |
+| --- | --- |
+| `GET /api/companies/:companyId/members` | `members:read` |
+| `GET /api/companies/:companyId/members/events` | `members:read` (historial de altas, cambios y bajas) |
+| `POST /api/companies/:companyId/members` | `members:manage` · `{ email, role }`; el usuario debe tener cuenta |
+| `PATCH /api/companies/:companyId/members/:userId` | `members:manage` · `{ role }` |
+| `DELETE /api/companies/:companyId/members/:userId` | `members:manage`, o cualquier miembro para retirarse a sí mismo |
+
 ### Empresas
+
+`GET /api/companies` lista solo las empresas de las que el usuario es miembro, con su rol.
+`POST /api/companies` lo puede usar cualquier usuario autenticado y lo deja como titular.
 
 | Método | Ruta | Descripción |
 | --- | --- | --- |

@@ -18,7 +18,7 @@ import {
   sendJson,
 } from "../http/http-utils.js";
 import type { Router } from "../http/router.js";
-import { requireCompany } from "./companies.routes.js";
+import { actorLabel, currentUser, requireCompanyAccess } from "../http/access.js";
 
 // OPENING y CLOSING quedan reservados a los cierres del sistema.
 const ORIGIN_TYPES = ["CPE_SALE", "PURCHASE", "COLLECTION", "PAYMENT", "ADJUSTMENT", "MANUAL"] as const;
@@ -66,8 +66,8 @@ export function parseJournalEntry(companyId: string, body: JsonObject): CreateJo
 export function registerAccountingRoutes(router: Router, services: ApiServices): void {
   const accounting = services.accounting;
 
-  router.on("POST", "/api/companies/:companyId/journal-entries", async ({ request, response, params }) => {
-    await requireCompany(services, params.companyId);
+  router.on("POST", "/api/companies/:companyId/journal-entries", async ({ request, response, params, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "accounting:write");
     const input = parseJournalEntry(params.companyId, await readJson(request, LARGE_MAX_BODY_BYTES));
     const entry = input.status === "DRAFT" || input.status === "PENDING"
       ? await accounting.registerDraftEntry(input)
@@ -75,52 +75,52 @@ export function registerAccountingRoutes(router: Router, services: ApiServices):
     sendJson(response, 201, entry);
   });
 
-  router.on("GET", "/api/companies/:companyId/journal-entries", async ({ response, params, query }) => {
-    await requireCompany(services, params.companyId);
+  router.on("GET", "/api/companies/:companyId/journal-entries", async ({ response, params, query, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "accounting:read");
     const period = requirePeriod(query.get("period"));
     sendJson(response, 200, { data: await accounting.getJournalEntries(params.companyId, period), period });
   });
 
-  router.on("POST", "/api/companies/:companyId/journal-entries/:entryId/post", async ({ response, params }) => {
-    await requireCompany(services, params.companyId);
+  router.on("POST", "/api/companies/:companyId/journal-entries/:entryId/post", async ({ response, params, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "accounting:write");
     sendJson(response, 200, await accounting.postEntry(params.companyId, params.entryId));
   });
 
-  router.on("GET", "/api/companies/:companyId/periods/:period", async ({ response, params }) => {
-    await requireCompany(services, params.companyId);
+  router.on("GET", "/api/companies/:companyId/periods/:period", async ({ response, params, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "accounting:read");
     sendJson(response, 200, await accounting.getPeriodRecord(params.companyId, requirePeriod(params.period)));
   });
 
-  router.on("POST", "/api/companies/:companyId/periods/:period/close", async ({ request, response, params }) => {
-    await requireCompany(services, params.companyId);
+  router.on("POST", "/api/companies/:companyId/periods/:period/close", async ({ request, response, params, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "accounting:close_period");
     const body = await readJson(request);
     sendJson(response, 200, await accounting.closePeriod({
       companyId: params.companyId,
       period: requirePeriod(params.period),
-      closedBy: optionalString(body, "closedBy", 100),
+      closedBy: actorLabel(currentUser(user)),
       notes: optionalString(body, "notes", 1000),
       allowEmptyPeriod: optionalBoolean(body, "allowEmptyPeriod"),
     }));
   });
 
-  router.on("POST", "/api/companies/:companyId/periods/:period/reopen", async ({ request, response, params }) => {
-    await requireCompany(services, params.companyId);
+  router.on("POST", "/api/companies/:companyId/periods/:period/reopen", async ({ request, response, params, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "accounting:reopen_period");
     const body = await readJson(request);
     sendJson(response, 200, await accounting.reopenPeriod({
       companyId: params.companyId,
       period: requirePeriod(params.period),
-      reopenedBy: requiredString(body, "reopenedBy", 100),
+      reopenedBy: actorLabel(currentUser(user)),
       reason: requiredString(body, "reason", 1000),
     }));
   });
 
-  router.on("GET", "/api/companies/:companyId/trial-balance", async ({ response, params, query }) => {
-    await requireCompany(services, params.companyId);
+  router.on("GET", "/api/companies/:companyId/trial-balance", async ({ response, params, query, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "accounting:read");
     sendJson(response, 200, await accounting.generateTrialBalance(params.companyId, requirePeriod(query.get("period"))));
   });
 
-  router.on("GET", "/api/companies/:companyId/general-ledger", async ({ response, params, query }) => {
-    await requireCompany(services, params.companyId);
+  router.on("GET", "/api/companies/:companyId/general-ledger", async ({ response, params, query, user }) => {
+    await requireCompanyAccess(services, user, params.companyId, "accounting:read");
     sendJson(response, 200, await accounting.generateGeneralLedger(params.companyId, requirePeriod(query.get("period"))));
   });
 }
