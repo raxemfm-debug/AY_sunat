@@ -3,3 +3,4 @@ export * from './postgres-company.repository.js';
 export * from './postgres-cpe.repository.js';
 export * from './postgres-purchase.repository.js';
 export * from './postgres-accounting-ledger.repository.js';
+export * from './postgres-user.repository.js';
